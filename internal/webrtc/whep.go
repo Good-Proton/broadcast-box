@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"sync/atomic"
 
+	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/google/uuid"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"go.uber.org/zap"
 )
 
 type (
@@ -95,7 +96,11 @@ func WHEP(offer, streamKey string) (string, string, error) {
 	peerConnection.OnICEConnectionStateChange(func(i webrtc.ICEConnectionState) {
 		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
 			if err := peerConnection.Close(); err != nil {
-				log.Println(err)
+				logger.Error("Failed to close peer connection",
+					zap.Error(err),
+					zap.String("streamKey", streamKey),
+					zap.String("iceState", i.String()),
+				)
 			}
 
 			peerConnectionDisconnected(false, streamKey, whepSessionId)
@@ -114,8 +119,13 @@ func WHEP(offer, streamKey string) (string, string, error) {
 
 	peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
 		stream.dataChannelsLock.Lock()
-		if err := ensureDataChannelPair(channel.Label(), stream, channel, &whepSessionId); err != nil {
-			log.Println(err)
+		label := channel.Label()
+		if err := ensureDataChannelPair(label, stream, channel, &whepSessionId); err != nil {
+			logger.Error("Failed to ensure data channel pair",
+				zap.Error(err),
+				zap.String("streamKey", streamKey),
+				zap.String("label", label),
+			)
 		}
 		stream.dataChannelsLock.Unlock()
 	})
@@ -199,6 +209,9 @@ func (w *whepSession) sendVideoPacket(rtpPkt *rtp.Packet, layer string, timeDiff
 	rtpPkt.Timestamp = w.timestamp
 
 	if err := w.videoTrack.WriteRTP(rtpPkt, codec); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-		log.Println(err)
+		logger.Error(
+			"Failed to write RTP packet",
+			zap.Error(err),
+		)
 	}
 }
