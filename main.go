@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -15,10 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/glimesh/broadcast-box/internal/networktest"
 	"github.com/glimesh/broadcast-box/internal/webhook"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 const (
@@ -71,31 +72,32 @@ func getStreamKey(action string, r *http.Request) (streamKey string, err error) 
 	return streamKey, nil
 }
 
-func logHTTPError(w http.ResponseWriter, err string, code int) {
-	log.Println(err)
-	http.Error(w, err, code)
+func logHTTPError(w http.ResponseWriter, err error, code int) {
+	logger.Error("HTTP error", zap.Error(err), zap.Int("status_code", code))
+	http.Error(w, err.Error(), code)
 }
 
 func whipHandler(res http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
+		logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
 		return
 	}
 
 	streamKey, err := getStreamKey("whip-connect", r)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
 	offer, err := io.ReadAll(r.Body)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
 	answer, err := webrtc.WHIP(string(offer), streamKey)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
@@ -103,30 +105,31 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 	res.Header().Add("Content-Type", "application/sdp")
 	res.WriteHeader(http.StatusCreated)
 	if _, err = fmt.Fprint(res, answer); err != nil {
-		log.Println(err)
+		logger.Error("Failed to write WHIP response", zap.Error(err))
 	}
 }
 
 func whepHandler(res http.ResponseWriter, req *http.Request) {
 	if req.Method != "POST" {
+		logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
 		return
 	}
 
 	streamKey, err := getStreamKey("whep-connect", req)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
 	offer, err := io.ReadAll(req.Body)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
 	answer, whepSessionId, err := webrtc.WHEP(string(offer), streamKey)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
@@ -137,7 +140,7 @@ func whepHandler(res http.ResponseWriter, req *http.Request) {
 	res.Header().Add("Content-Type", "application/sdp")
 	res.WriteHeader(http.StatusCreated)
 	if _, err = fmt.Fprint(res, answer); err != nil {
-		log.Println(err)
+		logger.Error("Failed to write WHEP response", zap.Error(err))
 	}
 }
 
@@ -151,19 +154,19 @@ func whepServerSentEventsHandler(res http.ResponseWriter, req *http.Request) {
 
 	layers, err := webrtc.WHEPLayers(whepSessionId)
 	if err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
 	if _, err = fmt.Fprintf(res, "event: layers\ndata: %s\n\n\n", string(layers)); err != nil {
-		log.Println(err)
+		logger.Error("Failed to write SSE response", zap.Error(err))
 	}
 }
 
 func whepLayerHandler(res http.ResponseWriter, req *http.Request) {
 	var r whepLayerRequestJSON
 	if err := json.NewDecoder(req.Body).Decode(&r); err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 
@@ -171,21 +174,21 @@ func whepLayerHandler(res http.ResponseWriter, req *http.Request) {
 	whepSessionId := vals[len(vals)-1]
 
 	if err := webrtc.WHEPChangeLayer(whepSessionId, r.EncodingId); err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 		return
 	}
 }
 
 func statusHandler(res http.ResponseWriter, req *http.Request) {
 	if os.Getenv("DISABLE_STATUS") != "" {
-		logHTTPError(res, "Status Service Unavailable", http.StatusServiceUnavailable)
+		logHTTPError(res, errors.New("status Service Unavailable"), http.StatusServiceUnavailable)
 		return
 	}
 
 	res.Header().Add("Content-Type", "application/json")
 
 	if err := json.NewEncoder(res).Encode(webrtc.GetStreamStatuses()); err != nil {
-		logHTTPError(res, err.Error(), http.StatusBadRequest)
+		logHTTPError(res, err, http.StatusBadRequest)
 	}
 }
 
@@ -219,10 +222,10 @@ func corsHandler(next func(w http.ResponseWriter, r *http.Request)) http.Handler
 
 func loadConfigs() error {
 	if os.Getenv("APP_ENV") == "development" {
-		log.Println("Loading `" + envFileDev + "`")
+		logger.Info("Loading development config", zap.String("file", envFileDev))
 		return godotenv.Load(envFileDev)
 	} else {
-		log.Println("Loading `" + envFileProd + "`")
+		logger.Info("Loading production config", zap.String("file", envFileProd))
 		if err := godotenv.Load(envFileProd); err != nil {
 			return err
 		}
@@ -236,20 +239,23 @@ func loadConfigs() error {
 }
 
 func main() {
+	logger.MustInitialize()
+	defer logger.Sync()
+
 	if err := loadConfigs(); err != nil {
-		log.Println("Failed to find config in CWD, changing CWD to executable path")
+		logger.Warn("Failed to find config in CWD, changing CWD to executable path")
 
 		exePath, err := os.Executable()
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal("Failed to get executable path", zap.Error(err))
 		}
 
 		if err = os.Chdir(filepath.Dir(exePath)); err != nil {
-			log.Fatal(err)
+			logger.Fatal("Failed to change working directory", zap.Error(err))
 		}
 
 		if err = loadConfigs(); err != nil {
-			log.Fatal(err)
+			logger.Fatal("Failed to load configs", zap.Error(err))
 		}
 	}
 
@@ -284,8 +290,8 @@ func main() {
 				}),
 			}
 
-			log.Println("Running HTTP->HTTPS redirect Server at :" + httpsRedirectPort)
-			log.Fatal(redirectServer.ListenAndServe())
+			logger.Info("Starting HTTP->HTTPS redirect server", zap.String("port", httpsRedirectPort))
+			logger.Fatal("HTTPS redirect server failed", zap.Error(redirectServer.ListenAndServe()))
 		}()
 	}
 
@@ -314,15 +320,15 @@ func main() {
 
 		cert, err := tls.LoadX509KeyPair(tlsCert, tlsKey)
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal("Failed to load TLS certificate", zap.Error(err))
 		}
 
 		server.TLSConfig.Certificates = append(server.TLSConfig.Certificates, cert)
 
-		log.Println("Running HTTPS Server at `" + os.Getenv("HTTP_ADDRESS") + "`")
-		log.Fatal(server.ListenAndServeTLS("", ""))
+		logger.Info("Starting HTTPS server", zap.String("address", os.Getenv("HTTP_ADDRESS")))
+		logger.Fatal("HTTPS server failed", zap.Error(server.ListenAndServeTLS("", "")))
 	} else {
-		log.Println("Running HTTP Server at `" + os.Getenv("HTTP_ADDRESS") + "`")
-		log.Fatal(server.ListenAndServe())
+		logger.Info("Starting HTTP server", zap.String("address", os.Getenv("HTTP_ADDRESS")))
+		logger.Fatal("HTTP server failed", zap.Error(server.ListenAndServe()))
 	}
 }
