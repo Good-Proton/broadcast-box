@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,10 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/pion/dtls/v3/pkg/crypto/elliptic"
 	"github.com/pion/ice/v3"
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
+	"go.uber.org/zap"
 )
 
 const (
@@ -195,28 +196,28 @@ func addTrack(stream *stream, rid, sessionId string) (*videoTrack, error) {
 func getPublicIP() string {
 	req, err := http.Get("http://ip-api.com/json/")
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("Failed to get public IP", zap.Error(err))
 	}
 	defer func() {
 		if closeErr := req.Body.Close(); closeErr != nil {
-			log.Fatal(err)
+			logger.Fatal("Failed to close request body", zap.Error(closeErr))
 		}
 	}()
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("Failed to read request body", zap.Error(err))
 	}
 
 	ip := struct {
 		Query string
 	}{}
 	if err = json.Unmarshal(body, &ip); err != nil {
-		log.Fatal(err)
+		logger.Fatal("Failed to unmarshal IP response", zap.Error(err))
 	}
 
 	if ip.Query == "" {
-		log.Fatal("Query entry was not populated")
+		logger.Fatal("Query entry was not populated")
 	}
 
 	return ip.Query
@@ -235,7 +236,10 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 		for _, networkTypeStr := range strings.Split(os.Getenv("NETWORK_TYPES"), "|") {
 			networkType, err := webrtc.NewNetworkType(networkTypeStr)
 			if err != nil {
-				log.Fatal(err)
+				logger.Fatal("Failed to create network type",
+					zap.Error(err),
+					zap.String("networkTypeStr", networkTypeStr),
+				)
 			}
 			networkTypes = append(networkTypes, networkType)
 		}
@@ -269,17 +273,21 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 		udpMuxOpts = append(udpMuxOpts, ice.UDPMuxFromPortWithInterfaceFilter(interfaceFilter))
 	}
 
-	if isWHIP && os.Getenv("UDP_MUX_PORT_WHIP") != "" {
-		if udpMuxPort, err = strconv.Atoi(os.Getenv("UDP_MUX_PORT_WHIP")); err != nil {
-			log.Fatal(err)
+	portWhipEnv := os.Getenv("PORT_RANGE_UDP_WHIP")
+	portWhepEnv := os.Getenv("PORT_RANGE_UDP_WHEP")
+	muxPortEnv := os.Getenv("UDP_MUX_PORT")
+
+	if isWHIP && portWhipEnv != "" {
+		if udpMuxPort, err = strconv.Atoi(portWhipEnv); err != nil {
+			logger.Fatal("Failed to parse UDP_MUX_PORT_WHIP", zap.Error(err), zap.String("value", portWhipEnv))
 		}
-	} else if !isWHIP && os.Getenv("UDP_MUX_PORT_WHEP") != "" {
-		if udpMuxPort, err = strconv.Atoi(os.Getenv("UDP_MUX_PORT_WHEP")); err != nil {
-			log.Fatal(err)
+	} else if !isWHIP && portWhepEnv != "" {
+		if udpMuxPort, err = strconv.Atoi(portWhepEnv); err != nil {
+			logger.Fatal("Failed to parse UDP_MUX_PORT_WHEP", zap.Error(err), zap.String("value", portWhepEnv))
 		}
-	} else if os.Getenv("UDP_MUX_PORT") != "" {
-		if udpMuxPort, err = strconv.Atoi(os.Getenv("UDP_MUX_PORT")); err != nil {
-			log.Fatal(err)
+	} else if muxPortEnv != "" {
+		if udpMuxPort, err = strconv.Atoi(muxPortEnv); err != nil {
+			logger.Fatal("Failed to parse UDP_MUX_PORT", zap.Error(err), zap.String("value", muxPortEnv))
 		}
 	}
 
@@ -287,7 +295,7 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 		udpMux, ok := udpMuxCache[udpMuxPort]
 		if !ok {
 			if udpMux, err = ice.NewMultiUDPMuxFromPort(udpMuxPort, udpMuxOpts...); err != nil {
-				log.Fatal(err)
+				logger.Fatal("Failed to create UDP mux", zap.Error(err), zap.Int("udpMuxPort", udpMuxPort))
 			}
 			udpMuxCache[udpMuxPort] = udpMux
 		}
@@ -295,21 +303,23 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 		settingEngine.SetICEUDPMux(udpMux)
 	}
 
-	if os.Getenv("TCP_MUX_ADDRESS") != "" {
-		tcpMux, ok := tcpMuxCache[os.Getenv("TCP_MUX_ADDRESS")]
+	tcpAddressEnv := os.Getenv("TCP_MUX_ADDRESS")
+
+	if tcpAddressEnv != "" {
+		tcpMux, ok := tcpMuxCache[tcpAddressEnv]
 		if !ok {
-			tcpAddr, err := net.ResolveTCPAddr("tcp", os.Getenv("TCP_MUX_ADDRESS"))
+			tcpAddr, err := net.ResolveTCPAddr("tcp", tcpAddressEnv)
 			if err != nil {
-				log.Fatal(err)
+				logger.Fatal("Failed to resolve TCP address", zap.Error(err), zap.String("value", tcpAddressEnv))
 			}
 
 			tcpListener, err := net.ListenTCP("tcp", tcpAddr)
 			if err != nil {
-				log.Fatal(err)
+				logger.Fatal("Failed to listen on TCP address", zap.Error(err), zap.String("address", tcpAddr.String()))
 			}
 
 			tcpMux = webrtc.NewICETCPMux(nil, tcpListener, 8)
-			tcpMuxCache[os.Getenv("TCP_MUX_ADDRESS")] = tcpMux
+			tcpMuxCache[tcpAddressEnv] = tcpMux
 		}
 		settingEngine.SetICETCPMux(tcpMux)
 
@@ -427,12 +437,13 @@ func Configure() {
 
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := PopulateMediaEngine(mediaEngine); err != nil {
+		logger.Error("Populating media engine failed", zap.Error(err))
 		panic(err)
 	}
 
 	interceptorRegistry := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
-		log.Fatal(err)
+		logger.Fatal("Registering default interceptors failed", zap.Error(err))
 	}
 
 	udpMuxCache := map[int]*ice.MultiUDPMuxDefault{}
@@ -551,7 +562,11 @@ func ensureDataChannelPair(label string, stream *stream, channel *webrtc.DataCha
 		for _, channels := range stream.subscriberDataChannels {
 			if channel, ok := channels[label]; ok {
 				if err := channel.Send(msg.Data); err != nil {
-					log.Println(err)
+					logger.Error("Failed to send data channel message",
+						zap.Error(err),
+						zap.Uint16p("channelId", channel.ID()),
+						zap.String("label", label),
+					)
 				}
 			}
 		}
@@ -565,7 +580,11 @@ func ensureDataChannelPair(label string, stream *stream, channel *webrtc.DataCha
 		for _, channels := range stream.subscriberDataChannels {
 			if channel, ok := channels[label]; ok {
 				if err := channel.Close(); err != nil {
-					log.Println(err)
+					logger.Error("Failed to send data channel message",
+						zap.Error(err),
+						zap.Uint16p("channelId", channel.ID()),
+						zap.String("label", label),
+					)
 				}
 			}
 		}
@@ -590,7 +609,11 @@ func ensureDataChannelPair(label string, stream *stream, channel *webrtc.DataCha
 
 			if channel, ok := stream.publisherDataChannels[label]; ok {
 				if err := channel.Send(msg.Data); err != nil {
-					log.Println(err)
+					logger.Error("Failed to send data channel message",
+						zap.Error(err),
+						zap.Uint16p("channelId", channel.ID()),
+						zap.String("label", label),
+					)
 				}
 			}
 		})

@@ -3,16 +3,17 @@ package webrtc
 import (
 	"errors"
 	"io"
-	"log"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/google/uuid"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
+	"go.uber.org/zap"
 )
 
 func audioWriter(remoteTrack *webrtc.TrackRemote, stream *stream) {
@@ -23,13 +24,13 @@ func audioWriter(remoteTrack *webrtc.TrackRemote, stream *stream) {
 		case errors.Is(err, io.EOF):
 			return
 		case err != nil:
-			log.Println(err)
+			logger.Error("Failed to read audio RTP packet", zap.Error(err))
 			return
 		}
 
 		stream.audioPacketsReceived.Add(1)
 		if _, writeErr := stream.audioTrack.Write(rtpBuf[:rtpRead]); writeErr != nil && !errors.Is(writeErr, io.ErrClosedPipe) {
-			log.Println(writeErr)
+			logger.Error("Failed to write audio RTP packet", zap.Error(writeErr))
 			return
 		}
 	}
@@ -43,7 +44,11 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 
 	videoTrack, err := addTrack(s, id, sessionId)
 	if err != nil {
-		log.Println(err)
+		logger.Error("Failed to add video track",
+			zap.Error(err),
+			zap.String("rid", id),
+			zap.String("sessionId", sessionId),
+		)
 		return
 	}
 
@@ -90,12 +95,20 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		case errors.Is(err, io.EOF):
 			return
 		case err != nil:
-			log.Println(err)
+			logger.Error("Failed to read RTP packet",
+				zap.Error(err),
+				zap.String("rid", id),
+				zap.String("sessionId", sessionId),
+			)
 			return
 		}
 
 		if err = rtpPkt.Unmarshal(rtpBuf[:rtpRead]); err != nil {
-			log.Println(err)
+			logger.Error("Failed to unmarshal RTP packet",
+				zap.Error(err),
+				zap.String("rid", id),
+				zap.String("sessionId", sessionId),
+			)
 			return
 		}
 
@@ -169,7 +182,11 @@ func WHIP(offer, streamKey string) (string, error) {
 	peerConnection.OnICEConnectionStateChange(func(i webrtc.ICEConnectionState) {
 		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
 			if err := peerConnection.Close(); err != nil {
-				log.Println(err)
+				logger.Error("Failed to close peer connection",
+					zap.Error(err),
+					zap.String("streamKey", streamKey),
+					zap.String("iceState", i.String()),
+				)
 			}
 			peerConnectionDisconnected(true, streamKey, whipSessionId)
 		}
@@ -189,8 +206,12 @@ func WHIP(offer, streamKey string) (string, error) {
 
 	peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
 		stream.dataChannelsLock.Lock()
-		if err := ensureDataChannelPair(channel.Label(), stream, channel, nil); err != nil {
-			log.Println(err)
+		label := channel.Label()
+		if err := ensureDataChannelPair(label, stream, channel, nil); err != nil {
+			logger.Error("Failed to ensure data channel pair",
+				zap.Error(err),
+				zap.String("label", label),
+			)
 		}
 		stream.dataChannelsLock.Unlock()
 	})

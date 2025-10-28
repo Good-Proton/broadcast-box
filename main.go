@@ -201,10 +201,14 @@ func indexHTMLWhenNotFound(fs http.FileSystem) http.Handler {
 
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		_, err := fs.Open(path.Clean(req.URL.Path)) // Do not allow path traversals.
-
-		if err != nil && (errors.Is(err, os.ErrNotExist) || strings.HasSuffix(err.Error(), "file name too long")) {
-			http.ServeFile(resp, req, "./web/build/index.html")
-			return
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || strings.HasSuffix(err.Error(), "file name too long") {
+				http.ServeFile(resp, req, "./web/build/index.html")
+				return
+			} else {
+				logHTTPError(resp, err, http.StatusInternalServerError)
+				return
+			}
 		}
 
 		fileServer.ServeHTTP(resp, req)
@@ -274,16 +278,15 @@ func main() {
 	webrtc.Configure()
 
 	if os.Getenv("NETWORK_TEST_ON_START") == "true" {
-		fmt.Println(networkTestIntroMessage) //nolint
+		logger.Info(networkTestIntroMessage)
 
 		go func() {
 			time.Sleep(time.Second * 5)
 
 			if networkTestErr := networktest.Run(whepHandler); networkTestErr != nil {
-				fmt.Printf(networkTestFailedMessage, networkTestErr.Error())
-				os.Exit(1)
+				logger.Fatal(networkTestFailedMessage, zap.Error(networkTestErr))
 			} else {
-				fmt.Println(networkTestSuccessMessage) //nolint
+				logger.Info(networkTestSuccessMessage)
 			}
 		}()
 	}
