@@ -44,6 +44,10 @@ type (
 		MediaId    string `json:"mediaId"`
 		EncodingId string `json:"encodingId"`
 	}
+
+	httpSimpleResponse struct {
+		Message string `json:"message"`
+	}
 )
 
 func getStreamKey(action string, r *http.Request) (streamKey string, err error) {
@@ -207,6 +211,14 @@ func indexHTMLWhenNotFound(fs http.FileSystem) http.Handler {
 	})
 }
 
+func healthCheckHandler(res http.ResponseWriter, req *http.Request) {
+	res.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(res).Encode(httpSimpleResponse{Message: "OK"}); err != nil {
+		logHTTPError(res, err, http.StatusBadRequest)
+	}
+}
+
 func corsHandler(next func(w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Access-Control-Allow-Origin", "*")
@@ -304,6 +316,7 @@ func main() {
 	mux.HandleFunc("/api/sse/", corsHandler(whepServerSentEventsHandler))
 	mux.HandleFunc("/api/layer/", corsHandler(whepLayerHandler))
 	mux.HandleFunc("/api/status", corsHandler(statusHandler))
+	mux.HandleFunc("/api/healthcheck", corsHandler(healthCheckHandler))
 
 	server := &http.Server{
 		Handler: mux,
