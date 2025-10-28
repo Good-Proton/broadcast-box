@@ -194,11 +194,12 @@ func indexHTMLWhenNotFound(fs http.FileSystem) http.Handler {
 
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		_, err := fs.Open(path.Clean(req.URL.Path)) // Do not allow path traversals.
-		if errors.Is(err, os.ErrNotExist) {
-			http.ServeFile(resp, req, "./web/build/index.html")
 
+		if err != nil && (errors.Is(err, os.ErrNotExist) || strings.HasSuffix(err.Error(), "file name too long")) {
+			http.ServeFile(resp, req, "./web/build/index.html")
 			return
 		}
+
 		fileServer.ServeHTTP(resp, req)
 	})
 }
