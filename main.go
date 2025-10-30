@@ -184,7 +184,7 @@ func whepLayerHandler(res http.ResponseWriter, req *http.Request) {
 }
 
 func statusHandler(res http.ResponseWriter, req *http.Request) {
-	if os.Getenv("DISABLE_STATUS") != "" {
+	if os.Getenv("DISABLE_STATUS") == "true" {
 		logHTTPError(res, errors.New("status Service Unavailable"), http.StatusServiceUnavailable)
 		return
 	}
@@ -246,7 +246,7 @@ func loadConfigs() error {
 			return err
 		}
 
-		if _, err := os.Stat("./web/build"); os.IsNotExist(err) && os.Getenv("DISABLE_FRONTEND") == "" {
+		if _, err := os.Stat("./web/build"); os.IsNotExist(err) && os.Getenv("DISABLE_FRONTEND") != "true" {
 			return errNoBuildDirectoryErr
 		}
 
@@ -311,7 +311,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	if os.Getenv("DISABLE_FRONTEND") == "" {
+	if os.Getenv("DISABLE_FRONTEND") != "true" {
 		mux.Handle("/", indexHTMLWhenNotFound(http.Dir("./web/build")))
 	}
 	mux.HandleFunc("/api/whip", corsHandler(whipHandler))
