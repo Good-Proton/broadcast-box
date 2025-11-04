@@ -50,7 +50,7 @@ func findPublicIp() (publicIp string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get public IP: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("public IP API returned non-200 status: %d", resp.StatusCode)

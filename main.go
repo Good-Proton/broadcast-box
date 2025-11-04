@@ -257,7 +257,7 @@ func loadConfigs() error {
 
 func main() {
 	logger.MustInitialize()
-	defer logger.Sync()
+	defer logger.Sync() // nolint:errcheck
 
 	if err := loadConfigs(); err != nil {
 		logger.Warn("Failed to find config in CWD, changing CWD to executable path")
