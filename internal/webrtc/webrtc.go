@@ -297,6 +297,15 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 			if udpMux, err = ice.NewMultiUDPMuxFromPort(udpMuxPort, udpMuxOpts...); err != nil {
 				logger.Fatal("Failed to create UDP mux", zap.Error(err), zap.Int("udpMuxPort", udpMuxPort))
 			}
+
+			for _, addr := range udpMux.GetListenAddresses() {
+				logger.Info(
+					"Listening to UDP mux",
+					zap.String("network", addr.Network()),
+					zap.String("address", addr.String()),
+				)
+			}
+
 			udpMuxCache[udpMuxPort] = udpMux
 		}
 
