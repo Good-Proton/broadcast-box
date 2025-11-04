@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/glimesh/broadcast-box/internal/config"
 )
 
 const defaultTimeout = time.Second * 5
 
 type webhookPayload struct {
-	Action      string            `json:"action"`
-	IP          string            `json:"ip"`
-	BearerToken string            `json:"bearerToken"`
-	QueryParams map[string]string `json:"queryParams"`
-	UserAgent   string            `json:"userAgent"`
+	Action           string            `json:"action"`
+	IP               string            `json:"ip"`
+	BearerToken      string            `json:"bearerToken"`
+	QueryParams      map[string]string `json:"queryParams"`
+	UserAgent        string            `json:"userAgent"`
+	AdvertiseAddress string            `json:"advertiseAddress"`
 }
 
 type webhookResponse struct {
@@ -32,12 +35,18 @@ func CallWebhook(url, action, bearerToken string, r *http.Request) (string, erro
 		}
 	}
 
+	cfg, err := config.GetAppConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to get app config: %w", err)
+	}
+
 	jsonPayload, err := json.Marshal(webhookPayload{
-		Action:      action,
-		IP:          getIPAddress(r),
-		BearerToken: bearerToken,
-		QueryParams: queryParams,
-		UserAgent:   r.UserAgent(),
+		Action:           action,
+		IP:               getIPAddress(r),
+		BearerToken:      bearerToken,
+		QueryParams:      queryParams,
+		UserAgent:        r.UserAgent(),
+		AdvertiseAddress: cfg.PublicIp,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)

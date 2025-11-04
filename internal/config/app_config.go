@@ -1,0 +1,65 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+
+	"github.com/glimesh/broadcast-box/internal/logger"
+	"go.uber.org/zap"
+)
+
+type appConfig struct {
+	PublicIp string
+}
+
+var (
+	appCfg *appConfig
+)
+
+func GetAppConfig() (*appConfig, error) {
+	if appCfg != nil {
+		return appCfg, nil
+	}
+
+	return nil, errors.New("app config not loaded")
+}
+
+func LoadConfig() (*appConfig, error) {
+	publicIp, err := findPublicIp()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load public IP: %w", err)
+	}
+	logger.Info("Public IP found", zap.String("ip", publicIp))
+
+	appCfg = &appConfig{
+		PublicIp: publicIp,
+	}
+
+	return appCfg, nil
+}
+
+func findPublicIp() (publicIp string, err error) {
+	ipApiUrl := os.Getenv("PUBLIC_IP_API_URL")
+	if ipApiUrl == "" {
+		return "", errors.New("PUBLIC_IP_API_URL environment variable is not set")
+	}
+
+	resp, err := http.Get(ipApiUrl)
+	if err != nil {
+		return "", fmt.Errorf("failed to get public IP: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("public IP API returned non-200 status: %d", resp.StatusCode)
+	}
+
+	var ipResponse string
+	if _, err := fmt.Fscan(resp.Body, &ipResponse); err != nil {
+		return "", fmt.Errorf("failed to read public IP API response: %w", err)
+	}
+
+	return ipResponse, nil
+}

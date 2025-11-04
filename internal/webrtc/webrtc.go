@@ -421,11 +421,11 @@ func appendAnswer(in string) string {
 }
 
 func maybePrintOfferAnswer(sdp string, isOffer bool) string {
-	if os.Getenv("DEBUG_PRINT_OFFER") != "" && isOffer {
+	if os.Getenv("DEBUG_PRINT_OFFER") != "true" && isOffer {
 		fmt.Println(sdp)
 	}
 
-	if os.Getenv("DEBUG_PRINT_ANSWER") != "" && !isOffer {
+	if os.Getenv("DEBUG_PRINT_ANSWER") != "true" && !isOffer {
 		fmt.Println(sdp)
 	}
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/config"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/glimesh/broadcast-box/internal/networktest"
 	"github.com/glimesh/broadcast-box/internal/webhook"
@@ -276,6 +277,10 @@ func main() {
 	}
 
 	webrtc.Configure()
+	_, err := config.LoadConfig()
+	if err != nil {
+		logger.Fatal("Failed to load app config", zap.Error(err))
+	}
 
 	if os.Getenv("NETWORK_TEST_ON_START") == "true" {
 		logger.Info(networkTestIntroMessage)
