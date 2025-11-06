@@ -51,10 +51,26 @@ type (
 	}
 )
 
+func checkStreamKey(authorizationHeader string) (string, error) {
+	const bearerPrefix = "Bearer "
+	if !strings.HasPrefix(authorizationHeader, bearerPrefix) {
+		logger.Error("Stream key format error. No prefix")
+		return "", errInvalidStreamKey
+	}
+
+	streamKey := strings.TrimPrefix(authorizationHeader, bearerPrefix)
+	if !streamKeyRegex.MatchString(streamKey) {
+		logger.Error("Stream key format error. Invalid characters")
+		return "", errInvalidStreamKey
+	}
+
+	return streamKey, nil
+}
+
 func getStreamKey(action string, r *http.Request) (streamKey string, err error) {
 	authorizationHeader := r.Header.Get("Authorization")
 	if authorizationHeader == "" {
-		logger.Error("Stream key format error. Empty")
+		logger.Error("Stream key format error. Empty", zap.String("header", authorizationHeader))
 		return "", errAuthorizationNotSet
 	}
 
@@ -74,7 +90,7 @@ func getStreamKey(action string, r *http.Request) (streamKey string, err error) 
 	}
 
 	if !streamKeyRegex.MatchString(streamKey) {
-		logger.Error("Stream key format error. Invalid characters")
+		logger.Error("Stream key format error. Invalid characters", zap.String("header", authorizationHeader), zap.String("streamKey", streamKey))
 		return "", errInvalidStreamKey
 	}
 
