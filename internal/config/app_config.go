@@ -30,9 +30,10 @@ func GetAppConfig() (*appConfig, error) {
 func LoadConfig() (*appConfig, error) {
 	publicIp, err := findPublicIp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load public IP: %w", err)
+		logger.Warn("Failed to load public IP", zap.Error(err))
+	} else {
+		logger.Info("Public IP found", zap.String("ip", publicIp))
 	}
-	logger.Info("Public IP found", zap.String("ip", publicIp))
 
 	jwtPublicKey := os.Getenv("JWT_PUBLIC_KEY")
 	if jwtPublicKey == "" {
