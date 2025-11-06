@@ -44,6 +44,8 @@ type (
 	httpSimpleResponse struct {
 		Message string `json:"message"`
 	}
+
+	StreamKeyVerifier func(action string, r *http.Request) (string, error)
 )
 
 func logHTTPError(w http.ResponseWriter, err error, code int) {
@@ -83,39 +85,45 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func whepHandlerFactory(streamKeyVerifier StreamKeyVerifier) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		if req.Method != "POST" {
+			logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
+			return
+		}
+
+		streamKey, err := streamKeyVerifier("whep-connect", req)
+		if err != nil {
+			logHTTPError(res, err, http.StatusBadRequest)
+			return
+		}
+
+		offer, err := io.ReadAll(req.Body)
+		if err != nil {
+			logHTTPError(res, err, http.StatusBadRequest)
+			return
+		}
+
+		answer, whepSessionId, err := webrtc.WHEP(string(offer), streamKey)
+		if err != nil {
+			logHTTPError(res, err, http.StatusBadRequest)
+			return
+		}
+
+		apiPath := req.Host + strings.TrimSuffix(req.URL.RequestURI(), "whep")
+		res.Header().Add("Link", `<`+apiPath+"sse/"+whepSessionId+`>; rel="urn:ietf:params:whep:ext:core:server-sent-events"; events="layers"`)
+		res.Header().Add("Link", `<`+apiPath+"layer/"+whepSessionId+`>; rel="urn:ietf:params:whep:ext:core:layer"`)
+		res.Header().Add("Location", "/api/whep")
+		res.Header().Add("Content-Type", "application/sdp")
+		res.WriteHeader(http.StatusCreated)
+		if _, err = fmt.Fprint(res, answer); err != nil {
+			logger.Error("Failed to write WHEP response", zap.Error(err))
+		}
+	}
+}
+
 func whepHandler(res http.ResponseWriter, req *http.Request) {
-	if req.Method != "POST" {
-		logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
-		return
-	}
-
-	streamKey, err := auth.GetStreamKey("whep-connect", req)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
-
-	offer, err := io.ReadAll(req.Body)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
-
-	answer, whepSessionId, err := webrtc.WHEP(string(offer), streamKey)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
-
-	apiPath := req.Host + strings.TrimSuffix(req.URL.RequestURI(), "whep")
-	res.Header().Add("Link", `<`+apiPath+"sse/"+whepSessionId+`>; rel="urn:ietf:params:whep:ext:core:server-sent-events"; events="layers"`)
-	res.Header().Add("Link", `<`+apiPath+"layer/"+whepSessionId+`>; rel="urn:ietf:params:whep:ext:core:layer"`)
-	res.Header().Add("Location", "/api/whep")
-	res.Header().Add("Content-Type", "application/sdp")
-	res.WriteHeader(http.StatusCreated)
-	if _, err = fmt.Fprint(res, answer); err != nil {
-		logger.Error("Failed to write WHEP response", zap.Error(err))
-	}
+	whepHandlerFactory(auth.GetStreamKey)(res, req)
 }
 
 func whepServerSentEventsHandler(res http.ResponseWriter, req *http.Request) {
@@ -257,7 +265,11 @@ func main() {
 		go func() {
 			time.Sleep(time.Second * 5)
 
-			if networkTestErr := networktest.Run(whepHandler); networkTestErr != nil {
+			if networkTestErr := networktest.Run(whepHandlerFactory(
+				func(action string, r *http.Request) (string, error) {
+					return "networktest", nil
+				},
+			)); networkTestErr != nil {
 				logger.Fatal(networkTestFailedMessage, zap.Error(networkTestErr))
 			} else {
 				logger.Info(networkTestSuccessMessage)
