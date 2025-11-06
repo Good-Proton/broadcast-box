@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/glimesh/broadcast-box/internal/env"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"go.uber.org/zap"
 )
@@ -35,7 +36,7 @@ func LoadConfig() (*appConfig, error) {
 		logger.Info("Public IP found", zap.String("ip", publicIp))
 	}
 
-	jwtPublicKey := os.Getenv("JWT_PUBLIC_KEY")
+	jwtPublicKey := env.Sanitize(os.Getenv("JWT_PUBLIC_KEY"))
 	if jwtPublicKey == "" {
 		logger.Info("JWT public key not set in environment variables; JWT authentication will be disabled")
 	} else {
