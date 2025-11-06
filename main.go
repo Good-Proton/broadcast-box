@@ -54,11 +54,13 @@ type (
 func getStreamKey(action string, r *http.Request) (streamKey string, err error) {
 	authorizationHeader := r.Header.Get("Authorization")
 	if authorizationHeader == "" {
+		logger.Error("Stream key format error. Empty")
 		return "", errAuthorizationNotSet
 	}
 
 	const bearerPrefix = "Bearer "
 	if !strings.HasPrefix(authorizationHeader, bearerPrefix) {
+		logger.Error("Stream key format error. No prefix")
 		return "", errInvalidStreamKey
 	}
 
@@ -66,11 +68,13 @@ func getStreamKey(action string, r *http.Request) (streamKey string, err error) 
 	if webhookUrl := os.Getenv("WEBHOOK_URL"); webhookUrl != "" {
 		streamKey, err = webhook.CallWebhook(webhookUrl, action, streamKey, r)
 		if err != nil {
+			logger.Error("Webhook call failed", zap.Error(err))
 			return "", err
 		}
 	}
 
 	if !streamKeyRegex.MatchString(streamKey) {
+		logger.Error("Stream key format error. Invalid characters")
 		return "", errInvalidStreamKey
 	}
 
