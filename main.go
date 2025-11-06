@@ -10,14 +10,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/config"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/glimesh/broadcast-box/internal/networktest"
-	"github.com/glimesh/broadcast-box/internal/webhook"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
@@ -34,10 +33,6 @@ const (
 
 var (
 	errNoBuildDirectoryErr = errors.New("\033[0;31mBuild directory does not exist, run `npm install` and `npm run build` in the web directory.\033[0m")
-	errAuthorizationNotSet = errors.New("authorization was not set")
-	errInvalidStreamKey    = errors.New("invalid stream key format")
-
-	streamKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.~]+$`)
 )
 
 type (
@@ -51,52 +46,6 @@ type (
 	}
 )
 
-func checkStreamKey(authorizationHeader string) (string, error) {
-	const bearerPrefix = "Bearer "
-	if !strings.HasPrefix(authorizationHeader, bearerPrefix) {
-		logger.Error("Stream key format error. No prefix")
-		return "", errInvalidStreamKey
-	}
-
-	streamKey := strings.TrimPrefix(authorizationHeader, bearerPrefix)
-	if !streamKeyRegex.MatchString(streamKey) {
-		logger.Error("Stream key format error. Invalid characters")
-		return "", errInvalidStreamKey
-	}
-
-	return streamKey, nil
-}
-
-func getStreamKey(action string, r *http.Request) (streamKey string, err error) {
-	authorizationHeader := r.Header.Get("Authorization")
-	if authorizationHeader == "" {
-		logger.Error("Stream key format error. Empty", zap.String("header", authorizationHeader))
-		return "", errAuthorizationNotSet
-	}
-
-	const bearerPrefix = "Bearer "
-	if !strings.HasPrefix(authorizationHeader, bearerPrefix) {
-		logger.Error("Stream key format error. No prefix")
-		return "", errInvalidStreamKey
-	}
-
-	streamKey = strings.TrimPrefix(authorizationHeader, bearerPrefix)
-	if webhookUrl := os.Getenv("WEBHOOK_URL"); webhookUrl != "" {
-		streamKey, err = webhook.CallWebhook(webhookUrl, action, streamKey, r)
-		if err != nil {
-			logger.Error("Webhook call failed", zap.Error(err))
-			return "", err
-		}
-	}
-
-	if !streamKeyRegex.MatchString(streamKey) {
-		logger.Error("Stream key format error. Invalid characters", zap.String("header", authorizationHeader), zap.String("streamKey", streamKey))
-		return "", errInvalidStreamKey
-	}
-
-	return streamKey, nil
-}
-
 func logHTTPError(w http.ResponseWriter, err error, code int) {
 	logger.Error("HTTP error", zap.Error(err), zap.Int("status_code", code))
 	http.Error(w, err.Error(), code)
@@ -108,7 +57,7 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streamKey, err := getStreamKey("whip-connect", r)
+	streamKey, err := auth.GetStreamKey("whip-connect", r)
 	if err != nil {
 		logHTTPError(res, err, http.StatusBadRequest)
 		return
@@ -140,7 +89,7 @@ func whepHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	streamKey, err := getStreamKey("whep-connect", req)
+	streamKey, err := auth.GetStreamKey("whep-connect", req)
 	if err != nil {
 		logHTTPError(res, err, http.StatusBadRequest)
 		return

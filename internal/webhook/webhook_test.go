@@ -5,9 +5,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/glimesh/broadcast-box/internal/config"
+	"github.com/glimesh/broadcast-box/internal/logger"
 )
+
+func TestMain(m *testing.M) {
+	logger.MustInitialize()
+	config.LoadConfig()
+
+	code := m.Run()
+
+	_ = logger.Sync()
+	os.Exit(code)
+}
 
 func TestCallWebhook(t *testing.T) {
 	// Setup a Mock HTTP Server
