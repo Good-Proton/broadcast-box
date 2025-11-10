@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/pion/dtls/v3/pkg/crypto/elliptic"
 	"github.com/pion/ice/v3"
@@ -39,6 +40,7 @@ type (
 		// If stream was created by a WHEP request hasWHIPClient == false
 		hasWHIPClient atomic.Bool
 		sessionId     string
+		lhUserId      string
 
 		firstSeenEpoch uint64
 
@@ -100,8 +102,8 @@ func getVideoTrackCodec(in string) videoTrackCodec {
 	return 0
 }
 
-func getStream(streamKey string, whipSessionId string) (*stream, error) {
-	foundStream, ok := streamMap[streamKey]
+func getStream(streamInfo *auth.StreamInfo, whipSessionId string) (*stream, error) {
+	foundStream, ok := streamMap[streamInfo.StreamKey]
 	if !ok {
 		audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, "audio", "pion")
 		if err != nil {
@@ -120,13 +122,15 @@ func getStream(streamKey string, whipSessionId string) (*stream, error) {
 			subscriberDataChannels:  make(map[string]map[string]*webrtc.DataChannel),
 			publisherDataChannels:   make(map[string]*webrtc.DataChannel),
 			subscriberConnections:   make(map[string]*webrtc.PeerConnection),
+			lhUserId:                streamInfo.LhUserId,
 		}
-		streamMap[streamKey] = foundStream
+		streamMap[streamInfo.StreamKey] = foundStream
 	}
 
 	if whipSessionId != "" {
 		foundStream.hasWHIPClient.Store(true)
 		foundStream.sessionId = whipSessionId
+		foundStream.lhUserId = streamInfo.LhUserId
 	}
 
 	return foundStream, nil
@@ -479,6 +483,7 @@ type StreamStatusVideo struct {
 
 type StreamStatus struct {
 	StreamKey            string              `json:"streamKey"`
+	LhUserId             string              `json:"lhUserId"`
 	FirstSeenEpoch       uint64              `json:"firstSeenEpoch"`
 	AudioPacketsReceived uint64              `json:"audioPacketsReceived"`
 	VideoStreams         []StreamStatusVideo `json:"videoStreams"`
@@ -534,6 +539,7 @@ func GetStreamStatuses() []StreamStatus {
 
 		out = append(out, StreamStatus{
 			StreamKey:            streamKey,
+			LhUserId:             stream.lhUserId,
 			FirstSeenEpoch:       stream.firstSeenEpoch,
 			AudioPacketsReceived: stream.audioPacketsReceived.Load(),
 			VideoStreams:         streamStatusVideo,

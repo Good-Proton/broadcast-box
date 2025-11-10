@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/google/uuid"
 	"github.com/pion/rtcp"
@@ -74,12 +75,12 @@ func WHEPChangeLayer(whepSessionId, layer string) error {
 	return nil
 }
 
-func WHEP(offer, streamKey string) (string, string, error) {
+func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	maybePrintOfferAnswer(offer, true)
 
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
-	stream, err := getStream(streamKey, "")
+	stream, err := getStream(streamInfo, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -98,12 +99,12 @@ func WHEP(offer, streamKey string) (string, string, error) {
 			if err := peerConnection.Close(); err != nil {
 				logger.Error("Failed to close peer connection",
 					zap.Error(err),
-					zap.String("streamKey", streamKey),
+					zap.String("streamKey", streamInfo.StreamKey),
 					zap.String("iceState", i.String()),
 				)
 			}
 
-			peerConnectionDisconnected(false, streamKey, whepSessionId)
+			peerConnectionDisconnected(false, streamInfo.StreamKey, whepSessionId)
 		}
 	})
 
@@ -123,7 +124,7 @@ func WHEP(offer, streamKey string) (string, string, error) {
 		if err := ensureDataChannelPair(label, stream, channel, &whepSessionId); err != nil {
 			logger.Error("Failed to ensure data channel pair",
 				zap.Error(err),
-				zap.String("streamKey", streamKey),
+				zap.String("streamKey", streamInfo.StreamKey),
 				zap.String("label", label),
 			)
 		}

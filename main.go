@@ -47,7 +47,7 @@ type (
 		Message string `json:"message"`
 	}
 
-	StreamKeyVerifier func(action string, r *http.Request) (string, error)
+	StreamInfoVerifier func(action string, r *http.Request) (*auth.StreamInfo, error)
 )
 
 func logHTTPError(w http.ResponseWriter, err error, code int) {
@@ -61,7 +61,7 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streamKey, err := auth.GetStreamKey("whip-connect", r)
+	streamInfo, err := auth.GetStreamInfo("whip-connect", r)
 	if err != nil {
 		logHTTPError(res, err, http.StatusBadRequest)
 		return
@@ -73,7 +73,7 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, err := webrtc.WHIP(string(offer), streamKey)
+	answer, err := webrtc.WHIP(string(offer), streamInfo)
 	if err != nil {
 		logHTTPError(res, err, http.StatusBadRequest)
 		return
@@ -87,14 +87,14 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func whepHandlerFactory(streamKeyVerifier StreamKeyVerifier) http.HandlerFunc {
+func whepHandlerFactory(streamInfoVerifier StreamInfoVerifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {
 			logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
 			return
 		}
 
-		streamKey, err := streamKeyVerifier("whep-connect", req)
+		streamInfo, err := streamInfoVerifier("whep-connect", req)
 		if err != nil {
 			logHTTPError(res, err, http.StatusBadRequest)
 			return
@@ -106,7 +106,7 @@ func whepHandlerFactory(streamKeyVerifier StreamKeyVerifier) http.HandlerFunc {
 			return
 		}
 
-		answer, whepSessionId, err := webrtc.WHEP(string(offer), streamKey)
+		answer, whepSessionId, err := webrtc.WHEP(string(offer), streamInfo)
 		if err != nil {
 			logHTTPError(res, err, http.StatusBadRequest)
 			return
@@ -125,7 +125,7 @@ func whepHandlerFactory(streamKeyVerifier StreamKeyVerifier) http.HandlerFunc {
 }
 
 func whepHandler(res http.ResponseWriter, req *http.Request) {
-	whepHandlerFactory(auth.GetStreamKey)(res, req)
+	whepHandlerFactory(auth.GetStreamInfo)(res, req)
 }
 
 func whepServerSentEventsHandler(res http.ResponseWriter, req *http.Request) {
@@ -217,6 +217,20 @@ func healthCheckHandler(res http.ResponseWriter, req *http.Request) {
 }
 
 func metricsHandler(res http.ResponseWriter, req *http.Request) {
+	config, err := config.GetAppConfig()
+	if err != nil {
+		logHTTPError(res, err, http.StatusInternalServerError)
+		return
+	}
+
+	if config.StatusAuthToken != "" {
+		authHeader := req.Header.Get("Authorization")
+		if authHeader != fmt.Sprintf("Bearer %s", config.StatusAuthToken) {
+			logHTTPError(res, errors.New("unauthorized"), http.StatusUnauthorized)
+			return
+		}
+	}
+
 	metrics.UpdateMetrics()
 	promhttp.Handler().ServeHTTP(res, req)
 }
@@ -286,8 +300,8 @@ func main() {
 			time.Sleep(time.Second * 5)
 
 			if networkTestErr := networktest.Run(whepHandlerFactory(
-				func(action string, r *http.Request) (string, error) {
-					return "networktest", nil
+				func(action string, r *http.Request) (*auth.StreamInfo, error) {
+					return &auth.StreamInfo{StreamKey: "networktest", LhUserId: ""}, nil
 				},
 			)); networkTestErr != nil {
 				logger.Fatal(networkTestFailedMessage, zap.Error(networkTestErr))

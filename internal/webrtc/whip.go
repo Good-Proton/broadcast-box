@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/google/uuid"
 	"github.com/pion/rtcp"
@@ -153,7 +154,7 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 	}
 }
 
-func WHIP(offer, streamKey string) (string, error) {
+func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 	maybePrintOfferAnswer(offer, true)
 
 	whipSessionId := uuid.New().String()
@@ -165,7 +166,7 @@ func WHIP(offer, streamKey string) (string, error) {
 
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
-	stream, err := getStream(streamKey, whipSessionId)
+	stream, err := getStream(streamInfo, whipSessionId)
 	if err != nil {
 		return "", err
 	}
@@ -184,11 +185,11 @@ func WHIP(offer, streamKey string) (string, error) {
 			if err := peerConnection.Close(); err != nil {
 				logger.Error("Failed to close peer connection",
 					zap.Error(err),
-					zap.String("streamKey", streamKey),
+					zap.String("streamKey", streamInfo.StreamKey),
 					zap.String("iceState", i.String()),
 				)
 			}
-			peerConnectionDisconnected(true, streamKey, whipSessionId)
+			peerConnectionDisconnected(true, streamInfo.StreamKey, whipSessionId)
 		}
 	})
 
