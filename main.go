@@ -167,6 +167,19 @@ func statusHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	config, err := config.GetAppConfig()
+	if err != nil {
+		logHTTPError(res, err, http.StatusInternalServerError)
+		return
+	}
+	if config.StatusAuthToken != "" {
+		authHeader := req.Header.Get("Authorization")
+		if authHeader != fmt.Sprintf("Bearer %s", config.StatusAuthToken) {
+			logHTTPError(res, errors.New("unauthorized"), http.StatusUnauthorized)
+			return
+		}
+	}
+
 	res.Header().Add("Content-Type", "application/json")
 
 	if err := json.NewEncoder(res).Encode(webrtc.GetStreamStatuses()); err != nil {

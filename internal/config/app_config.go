@@ -12,8 +12,9 @@ import (
 )
 
 type appConfig struct {
-	PublicIp     string
-	JwtPublicKey string
+	PublicIp        string
+	JwtPublicKey    string
+	StatusAuthToken string
 }
 
 var (
@@ -43,9 +44,17 @@ func LoadConfig() (*appConfig, error) {
 		logger.Info("JWT public key loaded from environment variables; JWT authentication enabled")
 	}
 
+	statusAuthToken := env.Sanitize(os.Getenv("STATUS_AUTH_TOKEN"))
+	if statusAuthToken == "" {
+		logger.Info("No status auth token in env. Status authentication will be disabled")
+	} else {
+		logger.Info("Status auth token loaded from env. Status authentication enabled")
+	}
+
 	appCfg = &appConfig{
-		PublicIp:     publicIp,
-		JwtPublicKey: jwtPublicKey,
+		PublicIp:        publicIp,
+		JwtPublicKey:    jwtPublicKey,
+		StatusAuthToken: statusAuthToken,
 	}
 
 	return appCfg, nil
