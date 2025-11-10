@@ -16,9 +16,11 @@ import (
 	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/config"
 	"github.com/glimesh/broadcast-box/internal/logger"
+	"github.com/glimesh/broadcast-box/internal/metrics"
 	"github.com/glimesh/broadcast-box/internal/networktest"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -214,6 +216,11 @@ func healthCheckHandler(res http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func metricsHandler(res http.ResponseWriter, req *http.Request) {
+	metrics.UpdateMetrics()
+	promhttp.Handler().ServeHTTP(res, req)
+}
+
 func corsHandler(next func(w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Access-Control-Allow-Origin", "*")
@@ -319,6 +326,7 @@ func main() {
 	mux.HandleFunc("/api/layer/", corsHandler(whepLayerHandler))
 	mux.HandleFunc("/api/status", corsHandler(statusHandler))
 	mux.HandleFunc("/api/healthcheck", corsHandler(healthCheckHandler))
+	mux.HandleFunc("/api/metrics", metricsHandler)
 
 	server := &http.Server{
 		Handler: mux,
