@@ -87,15 +87,15 @@ type (
 		startTime          uint64
 		width              atomic.Uint32
 		height             atomic.Uint32
-		
-		rtt                atomic.Uint64
-		jitter             atomic.Uint64
-		lastRTCPTime       atomic.Value
-		delay              atomic.Uint64
-		totalLost          atomic.Uint64
-		lastSenderReport   atomic.Uint64
-		
-		receiver           *webrtc.RTPReceiver
+
+		rtt              atomic.Uint64
+		jitter           atomic.Uint64
+		lastRTCPTime     atomic.Value
+		delay            atomic.Uint64
+		totalLost        atomic.Uint64
+		lastSenderReport atomic.Uint64
+
+		receiver *webrtc.RTPReceiver
 	}
 
 	videoTrackCodec int
@@ -527,7 +527,7 @@ type StreamStatusVideo struct {
 	StartTime         uint64    `json:"startTime"`
 	Width             uint32    `json:"width"`
 	Height            uint32    `json:"height"`
-	
+
 	Jitter           uint64    `json:"jitter"`
 	RTT              uint64    `json:"rtt"`
 	LastRTCPTime     time.Time `json:"lastRTCPTime"`
@@ -609,7 +609,7 @@ func GetStreamStatuses() []StreamStatus {
 				ICEConnectionState:        iceState,
 			})
 		}
-		stream.whepSessionsLock.Unlock()
+		stream.whepSessionsLock.RUnlock()
 
 		streamStatusVideo := make([]StreamStatusVideo, 0, len(stream.videoTracks))
 		for _, videoTrack := range stream.videoTracks {
@@ -639,7 +639,7 @@ func GetStreamStatuses() []StreamStatus {
 			}
 
 			var averageBitrate, frameRate float64
-			
+
 			if !lastPacketTime.IsZero() && !firstPacketTime.IsZero() {
 				duration := lastPacketTime.Sub(firstPacketTime).Seconds()
 				if duration > 0 {
