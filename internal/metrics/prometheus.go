@@ -63,14 +63,6 @@ var (
 		[]string{"stream_key", "lh_user_id", "rid", "codec"},
 	)
 
-	streamVideoPacketsLost = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "broadcast_box_stream_video_packets_lost_total",
-			Help: "Total number of video packets lost due to sequence number gaps",
-		},
-		[]string{"stream_key", "lh_user_id", "rid", "codec"},
-	)
-
 	streamVideoJitter = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_stream_video_jitter",
@@ -83,14 +75,6 @@ var (
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_stream_video_rtt_milliseconds",
 			Help: "Round-trip time in milliseconds from RTCP reports",
-		},
-		[]string{"stream_key", "lh_user_id", "rid", "codec"},
-	)
-
-	streamVideoPacketLossRate = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "broadcast_box_stream_video_packet_loss_rate_percent",
-			Help: "Packet loss rate as percentage",
 		},
 		[]string{"stream_key", "lh_user_id", "rid", "codec"},
 	)
@@ -289,10 +273,8 @@ func UpdateMetrics() {
 	streamVideoBytesReceived.Reset()
 	streamVideoFramesReceived.Reset()
 	streamVideoKeyframesReceived.Reset()
-	streamVideoPacketsLost.Reset()
 	streamVideoJitter.Reset()
 	streamVideoRTT.Reset()
-	streamVideoPacketLossRate.Reset()
 	streamVideoAverageBitrate.Reset()
 	streamVideoFrameRate.Reset()
 	streamVideoDelay.Reset()
@@ -333,10 +315,8 @@ func UpdateMetrics() {
 			streamVideoBytesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.BytesReceived))
 			streamVideoFramesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.FramesReceived))
 			streamVideoKeyframesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.KeyframesReceived))
-			streamVideoPacketsLost.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.PacketsLost))
 			streamVideoJitter.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.Jitter))
 			streamVideoRTT.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.RTT))
-			streamVideoPacketLossRate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.PacketLossRate)
 			streamVideoAverageBitrate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.AverageBitrate)
 			streamVideoFrameRate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.FrameRate)
 			streamVideoDelay.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.Delay))

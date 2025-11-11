@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -77,7 +78,19 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 
 				for _, pkt := range rtcpPackets {
 					switch rtcpPkt := pkt.(type) {
+					case *rtcp.SenderReport:
+						if rtcpPkt.SSRC == ssrc {
+							videoTrack.lastRTCPTime.Store(now)
+							logger.Debug("Received SenderReport",
+								zap.Uint32("ssrc", ssrc),
+								zap.String("rid", id),
+							)
+						}
 					case *rtcp.ReceiverReport:
+						logger.Debug("Received ReceiverReport",
+							zap.Uint32("ssrc", ssrc),
+							zap.String("rid", id),
+						)
 						for _, report := range rtcpPkt.Reports {
 							if report.SSRC == ssrc {
 								videoTrack.jitter.Store(uint64(report.Jitter))
@@ -87,6 +100,11 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 								videoTrack.lastRTCPTime.Store(now)
 							}
 						}
+					default:
+						logger.Debug("Received unknown RTCP packet type",
+							zap.String("type", fmt.Sprintf("%T", pkt)),
+							zap.String("rid", id),
+						)
 					}
 				}
 			}
@@ -163,22 +181,6 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 
 		videoTrack.packetsReceived.Add(1)
 		videoTrack.bytesReceived.Add(uint64(rtpRead))
-
-		// Track packet loss
-		lastSeq := videoTrack.lastSequenceNumber.Load()
-		if lastSeq != 0 {
-			expectedSeq := uint32(uint16(lastSeq) + 1)
-			if uint32(rtpPkt.SequenceNumber) != expectedSeq {
-				var lost uint32
-				if rtpPkt.SequenceNumber > uint16(lastSeq) {
-					lost = uint32(rtpPkt.SequenceNumber) - uint32(uint16(lastSeq)) - 1
-				} else {
-					lost = (uint32(0xFFFF) - uint32(uint16(lastSeq))) + uint32(rtpPkt.SequenceNumber)
-				}
-				videoTrack.packetsLost.Add(uint64(lost))
-			}
-		}
-		videoTrack.lastSequenceNumber.Store(uint32(rtpPkt.SequenceNumber))
 
 		if rtpPkt.Marker {
 			videoTrack.framesReceived.Add(1)

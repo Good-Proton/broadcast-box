@@ -79,7 +79,6 @@ type (
 		bytesReceived      atomic.Uint64
 		framesReceived     atomic.Uint64
 		keyframesReceived  atomic.Uint64
-		packetsLost        atomic.Uint64
 		lastSequenceNumber atomic.Uint32
 		lastKeyFrameSeen   atomic.Value
 		firstPacketTime    atomic.Value
@@ -517,7 +516,6 @@ type StreamStatusVideo struct {
 	Codec             string    `json:"codec"`
 	SSRC              uint32    `json:"ssrc"`
 	PacketsReceived   uint64    `json:"packetsReceived"`
-	PacketsLost       uint64    `json:"packetsLost"`
 	BytesReceived     uint64    `json:"bytesReceived"`
 	FramesReceived    uint64    `json:"framesReceived"`
 	KeyframesReceived uint64    `json:"keyframesReceived"`
@@ -534,7 +532,6 @@ type StreamStatusVideo struct {
 	Delay            uint64    `json:"delay"`
 	TotalLost        uint64    `json:"totalLost"`
 	LastSenderReport uint64    `json:"lastSenderReport"`
-	PacketLossRate   float64   `json:"packetLossRate"`
 	AverageBitrate   float64   `json:"averageBitrate"`
 	FrameRate        float64   `json:"frameRate"`
 }
@@ -628,15 +625,8 @@ func GetStreamStatuses() []StreamStatus {
 			}
 
 			packetsReceived := videoTrack.packetsReceived.Load()
-			packetsLost := videoTrack.packetsLost.Load()
 			bytesReceived := videoTrack.bytesReceived.Load()
 			framesReceived := videoTrack.framesReceived.Load()
-
-			var packetLossRate float64
-			if packetsReceived > 0 {
-				totalPackets := packetsReceived + packetsLost
-				packetLossRate = (float64(packetsLost) / float64(totalPackets)) * 100.0
-			}
 
 			var averageBitrate, frameRate float64
 
@@ -653,7 +643,6 @@ func GetStreamStatuses() []StreamStatus {
 				Codec:             videoTrack.codec,
 				SSRC:              videoTrack.ssrc,
 				PacketsReceived:   packetsReceived,
-				PacketsLost:       packetsLost,
 				BytesReceived:     bytesReceived,
 				FramesReceived:    framesReceived,
 				KeyframesReceived: videoTrack.keyframesReceived.Load(),
@@ -669,7 +658,6 @@ func GetStreamStatuses() []StreamStatus {
 				Delay:             videoTrack.delay.Load(),
 				TotalLost:         videoTrack.totalLost.Load(),
 				LastSenderReport:  videoTrack.lastSenderReport.Load(),
-				PacketLossRate:    packetLossRate,
 				AverageBitrate:    averageBitrate,
 				FrameRate:         frameRate,
 			})
