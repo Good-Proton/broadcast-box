@@ -57,24 +57,45 @@ type (
 		whepSessionsLock sync.RWMutex
 		whepSessions     map[string]*whepSession
 
-		subscriberDataChannels map[string]map[string]*webrtc.DataChannel
-		publisherDataChannels  map[string]*webrtc.DataChannel
-		dataChannelsLock       sync.RWMutex
+		subscriberDataChannels      map[string]map[string]*webrtc.DataChannel
+		publisherDataChannels       map[string]*webrtc.DataChannel
+		dataChannelsLock            sync.RWMutex
+		dataChannelMessagesReceived atomic.Uint64
+		dataChannelBytesSent        atomic.Uint64
+		dataChannelBytesReceived    atomic.Uint64
 
-		subscriberConnections map[string]*webrtc.PeerConnection
-		publisherConnection   *webrtc.PeerConnection
+		subscriberConnections         map[string]*webrtc.PeerConnection
+		publisherConnection           *webrtc.PeerConnection
+		whipConnectionEstablishedTime atomic.Uint64
+		whipICEConnectionState        atomic.Value
 	}
 
 	videoTrack struct {
-		sessionId         string
-		rid               string
-		codec             string
-		ssrc              uint32
-		packetsReceived   atomic.Uint64
-		bytesReceived     atomic.Uint64
-		framesReceived    atomic.Uint64
-		keyframesReceived atomic.Uint64
-		lastKeyFrameSeen  atomic.Value
+		sessionId          string
+		rid                string
+		codec              string
+		ssrc               uint32
+		packetsReceived    atomic.Uint64
+		bytesReceived      atomic.Uint64
+		framesReceived     atomic.Uint64
+		keyframesReceived  atomic.Uint64
+		packetsLost        atomic.Uint64
+		lastSequenceNumber atomic.Uint32
+		lastKeyFrameSeen   atomic.Value
+		firstPacketTime    atomic.Value
+		lastPacketTime     atomic.Value
+		startTime          uint64
+		width              atomic.Uint32
+		height             atomic.Uint32
+		
+		rtt                atomic.Uint64
+		jitter             atomic.Uint64
+		lastRTCPTime       atomic.Value
+		delay              atomic.Uint64
+		totalLost          atomic.Uint64
+		lastSenderReport   atomic.Uint64
+		
+		receiver           *webrtc.RTPReceiver
 	}
 
 	videoTrackCodec int
@@ -129,6 +150,7 @@ func getStream(streamInfo *auth.StreamInfo, whipSessionId string) (*stream, erro
 			subscriberConnections:   make(map[string]*webrtc.PeerConnection),
 			lhUserId:                streamInfo.LhUserId,
 		}
+		foundStream.whipICEConnectionState.Store("new")
 		streamMap[streamInfo.StreamKey] = foundStream
 	}
 
@@ -186,7 +208,7 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 	delete(streamMap, streamKey)
 }
 
-func addTrack(stream *stream, rid, sessionId, codec string, ssrc uint32) (*videoTrack, error) {
+func addTrack(stream *stream, rid, sessionId, codec string, ssrc uint32, receiver *webrtc.RTPReceiver) (*videoTrack, error) {
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
 
@@ -196,8 +218,18 @@ func addTrack(stream *stream, rid, sessionId, codec string, ssrc uint32) (*video
 		}
 	}
 
-	t := &videoTrack{rid: rid, sessionId: sessionId, codec: codec, ssrc: ssrc}
+	t := &videoTrack{
+		rid:       rid,
+		sessionId: sessionId,
+		codec:     codec,
+		ssrc:      ssrc,
+		startTime: uint64(time.Now().Unix()),
+		receiver:  receiver,
+	}
 	t.lastKeyFrameSeen.Store(time.Time{})
+	t.firstPacketTime.Store(time.Time{})
+	t.lastPacketTime.Store(time.Time{})
+	t.lastRTCPTime.Store(time.Time{})
 	stream.videoTracks = append(stream.videoTracks, t)
 	return t, nil
 }
@@ -485,19 +517,41 @@ type StreamStatusVideo struct {
 	Codec             string    `json:"codec"`
 	SSRC              uint32    `json:"ssrc"`
 	PacketsReceived   uint64    `json:"packetsReceived"`
+	PacketsLost       uint64    `json:"packetsLost"`
 	BytesReceived     uint64    `json:"bytesReceived"`
 	FramesReceived    uint64    `json:"framesReceived"`
 	KeyframesReceived uint64    `json:"keyframesReceived"`
 	LastKeyFrameSeen  time.Time `json:"lastKeyFrameSeen"`
+	FirstPacketTime   time.Time `json:"firstPacketTime"`
+	LastPacketTime    time.Time `json:"lastPacketTime"`
+	StartTime         uint64    `json:"startTime"`
+	Width             uint32    `json:"width"`
+	Height            uint32    `json:"height"`
+	
+	Jitter           uint64    `json:"jitter"`
+	RTT              uint64    `json:"rtt"`
+	LastRTCPTime     time.Time `json:"lastRTCPTime"`
+	Delay            uint64    `json:"delay"`
+	TotalLost        uint64    `json:"totalLost"`
+	LastSenderReport uint64    `json:"lastSenderReport"`
+	PacketLossRate   float64   `json:"packetLossRate"`
+	AverageBitrate   float64   `json:"averageBitrate"`
+	FrameRate        float64   `json:"frameRate"`
 }
 
 type StreamStatus struct {
-	StreamKey            string              `json:"streamKey"`
-	LhUserId             string              `json:"lhUserId"`
-	FirstSeenEpoch       uint64              `json:"firstSeenEpoch"`
-	AudioPacketsReceived uint64              `json:"audioPacketsReceived"`
-	VideoStreams         []StreamStatusVideo `json:"videoStreams"`
-	WHEPSessions         []whepSessionStatus `json:"whepSessions"`
+	StreamKey                     string              `json:"streamKey"`
+	LhUserId                      string              `json:"lhUserId"`
+	FirstSeenEpoch                uint64              `json:"firstSeenEpoch"`
+	AudioPacketsReceived          uint64              `json:"audioPacketsReceived"`
+	VideoStreams                  []StreamStatusVideo `json:"videoStreams"`
+	WHEPSessions                  []whepSessionStatus `json:"whepSessions"`
+	DataChannelCount              int                 `json:"dataChannelCount"`
+	DataChannelMessagesReceived   uint64              `json:"dataChannelMessagesReceived"`
+	DataChannelBytesSent          uint64              `json:"dataChannelBytesSent"`
+	DataChannelBytesReceived      uint64              `json:"dataChannelBytesReceived"`
+	WHIPConnectionEstablishedTime uint64              `json:"whipConnectionEstablishedTime"`
+	WHIPICEConnectionState        string              `json:"whipICEConnectionState"`
 }
 
 type whepSessionStatus struct {
@@ -513,22 +567,28 @@ type whepSessionStatus struct {
 	PacketsSkippedForKeyframe uint64 `json:"packetsSkippedForKeyframe"`
 	LayerSwitches             uint64 `json:"layerSwitches"`
 	SessionStartEpoch         uint64 `json:"sessionStartEpoch"`
+	ConnectionEstablishedTime uint64 `json:"connectionEstablishedTime"`
+	FirstPacketTime           uint64 `json:"firstPacketTime"`
+	LastPacketTime            uint64 `json:"lastPacketTime"`
+	ICEConnectionState        string `json:"iceConnectionState"`
 }
 
 func GetStreamStatuses() []StreamStatus {
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
 
-	out := []StreamStatus{}
+	out := make([]StreamStatus, 0, len(streamMap))
 
 	for streamKey, stream := range streamMap {
-		whepSessions := []whepSessionStatus{}
-		stream.whepSessionsLock.Lock()
+		stream.whepSessionsLock.RLock()
+		whepSessions := make([]whepSessionStatus, 0, len(stream.whepSessions))
 		for id, whepSession := range stream.whepSessions {
 			currentLayer, ok := whepSession.currentLayer.Load().(string)
 			if !ok {
 				continue
 			}
+
+			iceState, _ := whepSession.iceConnectionState.Load().(string)
 
 			whepSessions = append(whepSessions, whepSessionStatus{
 				ID:                        id,
@@ -543,36 +603,94 @@ func GetStreamStatuses() []StreamStatus {
 				PacketsSkippedForKeyframe: whepSession.packetsSkippedForKeyframe.Load(),
 				LayerSwitches:             whepSession.layerSwitches.Load(),
 				SessionStartEpoch:         whepSession.sessionStartEpoch,
+				ConnectionEstablishedTime: whepSession.connectionEstablishedTime.Load(),
+				FirstPacketTime:           whepSession.firstPacketTime.Load(),
+				LastPacketTime:            whepSession.lastPacketTime.Load(),
+				ICEConnectionState:        iceState,
 			})
 		}
 		stream.whepSessionsLock.Unlock()
 
-		streamStatusVideo := []StreamStatusVideo{}
+		streamStatusVideo := make([]StreamStatusVideo, 0, len(stream.videoTracks))
 		for _, videoTrack := range stream.videoTracks {
-			var lastKeyFrameSeen time.Time
+			var lastKeyFrameSeen, firstPacketTime, lastPacketTime, lastRTCPTime time.Time
 			if v, ok := videoTrack.lastKeyFrameSeen.Load().(time.Time); ok {
 				lastKeyFrameSeen = v
+			}
+			if v, ok := videoTrack.firstPacketTime.Load().(time.Time); ok {
+				firstPacketTime = v
+			}
+			if v, ok := videoTrack.lastPacketTime.Load().(time.Time); ok {
+				lastPacketTime = v
+			}
+			if v, ok := videoTrack.lastRTCPTime.Load().(time.Time); ok {
+				lastRTCPTime = v
+			}
+
+			packetsReceived := videoTrack.packetsReceived.Load()
+			packetsLost := videoTrack.packetsLost.Load()
+			bytesReceived := videoTrack.bytesReceived.Load()
+			framesReceived := videoTrack.framesReceived.Load()
+
+			var packetLossRate float64
+			if packetsReceived > 0 {
+				totalPackets := packetsReceived + packetsLost
+				packetLossRate = (float64(packetsLost) / float64(totalPackets)) * 100.0
+			}
+
+			var averageBitrate, frameRate float64
+			
+			if !lastPacketTime.IsZero() && !firstPacketTime.IsZero() {
+				duration := lastPacketTime.Sub(firstPacketTime).Seconds()
+				if duration > 0 {
+					averageBitrate = (float64(bytesReceived) * 8) / duration
+					frameRate = float64(framesReceived) / duration
+				}
 			}
 
 			streamStatusVideo = append(streamStatusVideo, StreamStatusVideo{
 				RID:               videoTrack.rid,
 				Codec:             videoTrack.codec,
 				SSRC:              videoTrack.ssrc,
-				PacketsReceived:   videoTrack.packetsReceived.Load(),
-				BytesReceived:     videoTrack.bytesReceived.Load(),
-				FramesReceived:    videoTrack.framesReceived.Load(),
+				PacketsReceived:   packetsReceived,
+				PacketsLost:       packetsLost,
+				BytesReceived:     bytesReceived,
+				FramesReceived:    framesReceived,
 				KeyframesReceived: videoTrack.keyframesReceived.Load(),
 				LastKeyFrameSeen:  lastKeyFrameSeen,
+				FirstPacketTime:   firstPacketTime,
+				LastPacketTime:    lastPacketTime,
+				StartTime:         videoTrack.startTime,
+				Width:             videoTrack.width.Load(),
+				Height:            videoTrack.height.Load(),
+				Jitter:            videoTrack.jitter.Load(),
+				RTT:               videoTrack.rtt.Load(),
+				LastRTCPTime:      lastRTCPTime,
+				Delay:             videoTrack.delay.Load(),
+				TotalLost:         videoTrack.totalLost.Load(),
+				LastSenderReport:  videoTrack.lastSenderReport.Load(),
+				PacketLossRate:    packetLossRate,
+				AverageBitrate:    averageBitrate,
+				FrameRate:         frameRate,
 			})
 		}
 
+		dataChannelCount := len(stream.publisherDataChannels)
+		whipICEState, _ := stream.whipICEConnectionState.Load().(string)
+
 		out = append(out, StreamStatus{
-			StreamKey:            streamKey,
-			LhUserId:             stream.lhUserId,
-			FirstSeenEpoch:       stream.firstSeenEpoch,
-			AudioPacketsReceived: stream.audioPacketsReceived.Load(),
-			VideoStreams:         streamStatusVideo,
-			WHEPSessions:         whepSessions,
+			StreamKey:                     streamKey,
+			LhUserId:                      stream.lhUserId,
+			FirstSeenEpoch:                stream.firstSeenEpoch,
+			AudioPacketsReceived:          stream.audioPacketsReceived.Load(),
+			VideoStreams:                  streamStatusVideo,
+			WHEPSessions:                  whepSessions,
+			DataChannelCount:              dataChannelCount,
+			DataChannelMessagesReceived:   stream.dataChannelMessagesReceived.Load(),
+			DataChannelBytesSent:          stream.dataChannelBytesSent.Load(),
+			DataChannelBytesReceived:      stream.dataChannelBytesReceived.Load(),
+			WHIPConnectionEstablishedTime: stream.whipConnectionEstablishedTime.Load(),
+			WHIPICEConnectionState:        whipICEState,
 		})
 	}
 
@@ -600,6 +718,9 @@ func ensureDataChannelPair(label string, stream *stream, channel *webrtc.DataCha
 	}
 
 	stream.publisherDataChannels[label].OnMessage(func(msg webrtc.DataChannelMessage) {
+		stream.dataChannelMessagesReceived.Add(1)
+		stream.dataChannelBytesReceived.Add(uint64(len(msg.Data)))
+
 		stream.dataChannelsLock.RLock()
 		defer stream.dataChannelsLock.RUnlock()
 
@@ -611,6 +732,8 @@ func ensureDataChannelPair(label string, stream *stream, channel *webrtc.DataCha
 						zap.Uint16p("channelId", channel.ID()),
 						zap.String("label", label),
 					)
+				} else {
+					stream.dataChannelBytesSent.Add(uint64(len(msg.Data)))
 				}
 			}
 		}

@@ -63,6 +63,118 @@ var (
 		[]string{"stream_key", "lh_user_id", "rid", "codec"},
 	)
 
+	streamVideoPacketsLost = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_packets_lost_total",
+			Help: "Total number of video packets lost due to sequence number gaps",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoJitter = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_jitter",
+			Help: "Jitter value from RTCP reports",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoRTT = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_rtt_milliseconds",
+			Help: "Round-trip time in milliseconds from RTCP reports",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoPacketLossRate = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_packet_loss_rate_percent",
+			Help: "Packet loss rate as percentage",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoAverageBitrate = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_average_bitrate_bps",
+			Help: "Average video bitrate in bits per second",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoFrameRate = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_frame_rate_fps",
+			Help: "Frame rate in frames per second",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoDelay = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_delay",
+			Help: "Delay from RTCP Receiver Report",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoTotalLost = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_total_lost",
+			Help: "Total packets lost from RTCP Receiver Report",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamVideoLastSenderReport = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_video_last_sender_report",
+			Help: "Last sender report timestamp from RTCP",
+		},
+		[]string{"stream_key", "lh_user_id", "rid", "codec"},
+	)
+
+	streamDataChannelCount = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_data_channel_count",
+			Help: "Number of active data channels for the stream",
+		},
+		[]string{"stream_key", "lh_user_id"},
+	)
+
+	streamDataChannelMessagesReceived = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_data_channel_messages_received_total",
+			Help: "Total number of data channel messages received",
+		},
+		[]string{"stream_key", "lh_user_id"},
+	)
+
+	streamDataChannelBytesSent = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_data_channel_bytes_sent_total",
+			Help: "Total number of bytes sent via data channels",
+		},
+		[]string{"stream_key", "lh_user_id"},
+	)
+
+	streamDataChannelBytesReceived = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_stream_data_channel_bytes_received_total",
+			Help: "Total number of bytes received via data channels",
+		},
+		[]string{"stream_key", "lh_user_id"},
+	)
+
+	whipConnectionEstablishedTime = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whip_connection_established_time",
+			Help: "Unix timestamp when WHIP connection was established",
+		},
+		[]string{"stream_key", "lh_user_id"},
+	)
+
 	whepSessionPacketsWritten = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_whep_session_packets_written_total",
@@ -143,6 +255,14 @@ var (
 		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
 	)
 
+	whepSessionConnectionEstablishedTime = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_connection_established_time",
+			Help: "Unix timestamp when WHEP session connection was established",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
 	activeStreamsCount = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_active_streams_total",
@@ -169,6 +289,20 @@ func UpdateMetrics() {
 	streamVideoBytesReceived.Reset()
 	streamVideoFramesReceived.Reset()
 	streamVideoKeyframesReceived.Reset()
+	streamVideoPacketsLost.Reset()
+	streamVideoJitter.Reset()
+	streamVideoRTT.Reset()
+	streamVideoPacketLossRate.Reset()
+	streamVideoAverageBitrate.Reset()
+	streamVideoFrameRate.Reset()
+	streamVideoDelay.Reset()
+	streamVideoTotalLost.Reset()
+	streamVideoLastSenderReport.Reset()
+	streamDataChannelCount.Reset()
+	streamDataChannelMessagesReceived.Reset()
+	streamDataChannelBytesSent.Reset()
+	streamDataChannelBytesReceived.Reset()
+	whipConnectionEstablishedTime.Reset()
 
 	whepSessionPacketsWritten.Reset()
 	whepSessionSequenceNumber.Reset()
@@ -180,6 +314,7 @@ func UpdateMetrics() {
 	whepSessionPacketsSkippedForKeyframe.Reset()
 	whepSessionLayerSwitches.Reset()
 	whepSessionStartEpoch.Reset()
+	whepSessionConnectionEstablishedTime.Reset()
 	activeWhepSessionsCount.Reset()
 
 	activeStreamsCount.Set(float64(len(statuses)))
@@ -187,12 +322,26 @@ func UpdateMetrics() {
 	for _, status := range statuses {
 		streamFirstSeenEpoch.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.FirstSeenEpoch))
 		streamAudioPacketsReceived.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.AudioPacketsReceived))
+		streamDataChannelCount.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.DataChannelCount))
+		streamDataChannelMessagesReceived.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.DataChannelMessagesReceived))
+		streamDataChannelBytesSent.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.DataChannelBytesSent))
+		streamDataChannelBytesReceived.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.DataChannelBytesReceived))
+		whipConnectionEstablishedTime.WithLabelValues(status.StreamKey, status.LhUserId).Set(float64(status.WHIPConnectionEstablishedTime))
 
 		for _, video := range status.VideoStreams {
 			streamVideoPacketsReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.PacketsReceived))
 			streamVideoBytesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.BytesReceived))
 			streamVideoFramesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.FramesReceived))
 			streamVideoKeyframesReceived.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.KeyframesReceived))
+			streamVideoPacketsLost.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.PacketsLost))
+			streamVideoJitter.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.Jitter))
+			streamVideoRTT.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.RTT))
+			streamVideoPacketLossRate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.PacketLossRate)
+			streamVideoAverageBitrate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.AverageBitrate)
+			streamVideoFrameRate.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(video.FrameRate)
+			streamVideoDelay.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.Delay))
+			streamVideoTotalLost.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.TotalLost))
+			streamVideoLastSenderReport.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.LastSenderReport))
 
 			if !video.LastKeyFrameSeen.IsZero() {
 				streamVideoLastKeyFrameSeen.WithLabelValues(status.StreamKey, status.LhUserId, video.RID, video.Codec).Set(float64(video.LastKeyFrameSeen.Unix()))
@@ -212,6 +361,7 @@ func UpdateMetrics() {
 			whepSessionPacketsSkippedForKeyframe.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.PacketsSkippedForKeyframe))
 			whepSessionLayerSwitches.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.LayerSwitches))
 			whepSessionStartEpoch.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.SessionStartEpoch))
+			whepSessionConnectionEstablishedTime.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.ConnectionEstablishedTime))
 		}
 	}
 }

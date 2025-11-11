@@ -19,6 +19,7 @@ import (
 type (
 	whepSession struct {
 		videoTrack                *trackMultiCodec
+		peerConnection            *webrtc.PeerConnection
 		currentLayer              atomic.Value
 		waitingForKeyframe        atomic.Bool
 		sequenceNumber            uint16
@@ -31,6 +32,10 @@ type (
 		packetsSkippedForKeyframe atomic.Uint64
 		layerSwitches             atomic.Uint64
 		sessionStartEpoch         uint64
+		connectionEstablishedTime atomic.Uint64
+		firstPacketTime           atomic.Uint64
+		lastPacketTime            atomic.Uint64
+		iceConnectionState        atomic.Value
 	}
 
 	simulcastLayerResponse struct {
@@ -107,6 +112,15 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	}
 
 	peerConnection.OnICEConnectionStateChange(func(i webrtc.ICEConnectionState) {
+		stream.whepSessionsLock.Lock()
+		if session, ok := stream.whepSessions[whepSessionId]; ok {
+			session.iceConnectionState.Store(i.String())
+			if i == webrtc.ICEConnectionStateConnected && session.connectionEstablishedTime.Load() == 0 {
+				session.connectionEstablishedTime.Store(uint64(time.Now().Unix()))
+			}
+		}
+		stream.whepSessionsLock.Unlock()
+		
 		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
 			if err := peerConnection.Close(); err != nil {
 				logger.Error("Failed to close peer connection",
@@ -193,11 +207,15 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 
 	stream.whepSessions[whepSessionId] = &whepSession{
 		videoTrack:        videoTrack,
+		peerConnection:    peerConnection,
 		timestamp:         50000,
 		sessionStartEpoch: uint64(time.Now().Unix()),
 	}
 	stream.whepSessions[whepSessionId].currentLayer.Store("")
 	stream.whepSessions[whepSessionId].waitingForKeyframe.Store(false)
+	stream.whepSessions[whepSessionId].iceConnectionState.Store("new")
+	stream.whepSessions[whepSessionId].firstPacketTime.Store(uint64(0))
+	stream.whepSessions[whepSessionId].lastPacketTime.Store(uint64(0))
 
 	return maybePrintOfferAnswer(appendAnswer(peerConnection.LocalDescription().SDP), false), whepSessionId, nil
 }
@@ -220,6 +238,12 @@ func (w *whepSession) sendVideoPacket(rtpPkt *rtp.Packet, layer string, timeDiff
 	if currentLayer != "" && layer != currentLayer.(string) {
 		w.layerSwitches.Add(1)
 	}
+
+	now := uint64(time.Now().Unix())
+	if w.firstPacketTime.Load() == 0 {
+		w.firstPacketTime.Store(now)
+	}
+	w.lastPacketTime.Store(now)
 
 	w.packetsWritten += 1
 	w.sequenceNumber = uint16(int(w.sequenceNumber) + sequenceDiff)

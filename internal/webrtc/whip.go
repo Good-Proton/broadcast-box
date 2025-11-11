@@ -37,7 +37,7 @@ func audioWriter(remoteTrack *webrtc.TrackRemote, stream *stream) {
 	}
 }
 
-func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection *webrtc.PeerConnection, s *stream, sessionId string) {
+func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection *webrtc.PeerConnection, s *stream, sessionId string, receiver *webrtc.RTPReceiver) {
 	id := remoteTrack.RID()
 	if id == "" {
 		id = videoTrackLabelDefault
@@ -46,7 +46,7 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 	codecMimeType := remoteTrack.Codec().MimeType
 	ssrc := uint32(remoteTrack.SSRC())
 
-	videoTrack, err := addTrack(s, id, sessionId, codecMimeType, ssrc)
+	videoTrack, err := addTrack(s, id, sessionId, codecMimeType, ssrc, receiver)
 	if err != nil {
 		logger.Error("Failed to add video track",
 			zap.Error(err),
@@ -55,6 +55,43 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		)
 		return
 	}
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stream.whipActiveContext.Done():
+				return
+			case <-ticker.C:
+				if receiver == nil {
+					continue
+				}
+
+				now := time.Now()
+				rtcpPackets, _, err := receiver.ReadRTCP()
+				if err != nil {
+					break
+				}
+
+				for _, pkt := range rtcpPackets {
+					switch rtcpPkt := pkt.(type) {
+					case *rtcp.ReceiverReport:
+						for _, report := range rtcpPkt.Reports {
+							if report.SSRC == ssrc {
+								videoTrack.jitter.Store(uint64(report.Jitter))
+								videoTrack.delay.Store(uint64(report.Delay))
+								videoTrack.totalLost.Store(uint64(report.TotalLost))
+								videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
+								videoTrack.lastRTCPTime.Store(now)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
 
 	go func() {
 		for {
@@ -116,8 +153,32 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 			return
 		}
 
+		now := time.Now()
+
+		// Track first packet time
+		if firstPacket, ok := videoTrack.firstPacketTime.Load().(time.Time); !ok || firstPacket.IsZero() {
+			videoTrack.firstPacketTime.Store(now)
+		}
+		videoTrack.lastPacketTime.Store(now)
+
 		videoTrack.packetsReceived.Add(1)
 		videoTrack.bytesReceived.Add(uint64(rtpRead))
+
+		// Track packet loss
+		lastSeq := videoTrack.lastSequenceNumber.Load()
+		if lastSeq != 0 {
+			expectedSeq := uint32(uint16(lastSeq) + 1)
+			if uint32(rtpPkt.SequenceNumber) != expectedSeq {
+				var lost uint32
+				if rtpPkt.SequenceNumber > uint16(lastSeq) {
+					lost = uint32(rtpPkt.SequenceNumber) - uint32(uint16(lastSeq)) - 1
+				} else {
+					lost = (uint32(0xFFFF) - uint32(uint16(lastSeq))) + uint32(rtpPkt.SequenceNumber)
+				}
+				videoTrack.packetsLost.Add(uint64(lost))
+			}
+		}
+		videoTrack.lastSequenceNumber.Store(uint32(rtpPkt.SequenceNumber))
 
 		if rtpPkt.Marker {
 			videoTrack.framesReceived.Add(1)
@@ -127,7 +188,7 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		isKeyframe := isKeyframe(rtpPkt, codec, depacketizer)
 		if isKeyframe && codec == videoTrackCodecH264 {
 			videoTrack.keyframesReceived.Add(1)
-			videoTrack.lastKeyFrameSeen.Store(time.Now())
+			videoTrack.lastKeyFrameSeen.Store(now)
 		}
 
 		rtpPkt.Extension = false
@@ -184,12 +245,17 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 		if strings.HasPrefix(remoteTrack.Codec().MimeType, "audio") {
 			audioWriter(remoteTrack, stream)
 		} else {
-			videoWriter(remoteTrack, stream, peerConnection, stream, whipSessionId)
-
+			videoWriter(remoteTrack, stream, peerConnection, stream, whipSessionId, rtpReceiver)
 		}
 	})
 
 	peerConnection.OnICEConnectionStateChange(func(i webrtc.ICEConnectionState) {
+		stream.whipICEConnectionState.Store(i.String())
+
+		if i == webrtc.ICEConnectionStateConnected && stream.whipConnectionEstablishedTime.Load() == 0 {
+			stream.whipConnectionEstablishedTime.Store(uint64(time.Now().Unix()))
+		}
+
 		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
 			if err := peerConnection.Close(); err != nil {
 				logger.Error("Failed to close peer connection",
