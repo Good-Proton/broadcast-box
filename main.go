@@ -57,7 +57,7 @@ func logHTTPError(w http.ResponseWriter, err error, code int) {
 
 func whipHandler(res http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
+		logHTTPError(res, errors.New("invalid request method: "+r.Method), http.StatusBadRequest)
 		return
 	}
 
@@ -90,7 +90,7 @@ func whipHandler(res http.ResponseWriter, r *http.Request) {
 func whepHandlerFactory(streamInfoVerifier StreamInfoVerifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {
-			logHTTPError(res, errors.New("invalid request method"), http.StatusBadRequest)
+			logHTTPError(res, errors.New("invalid request method: "+req.Method), http.StatusBadRequest)
 			return
 		}
 
