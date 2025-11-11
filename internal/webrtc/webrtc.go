@@ -66,10 +66,15 @@ type (
 	}
 
 	videoTrack struct {
-		sessionId        string
-		rid              string
-		packetsReceived  atomic.Uint64
-		lastKeyFrameSeen atomic.Value
+		sessionId         string
+		rid               string
+		codec             string
+		ssrc              uint32
+		packetsReceived   atomic.Uint64
+		bytesReceived     atomic.Uint64
+		framesReceived    atomic.Uint64
+		keyframesReceived atomic.Uint64
+		lastKeyFrameSeen  atomic.Value
 	}
 
 	videoTrackCodec int
@@ -181,7 +186,7 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 	delete(streamMap, streamKey)
 }
 
-func addTrack(stream *stream, rid, sessionId string) (*videoTrack, error) {
+func addTrack(stream *stream, rid, sessionId, codec string, ssrc uint32) (*videoTrack, error) {
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
 
@@ -191,7 +196,7 @@ func addTrack(stream *stream, rid, sessionId string) (*videoTrack, error) {
 		}
 	}
 
-	t := &videoTrack{rid: rid, sessionId: sessionId}
+	t := &videoTrack{rid: rid, sessionId: sessionId, codec: codec, ssrc: ssrc}
 	t.lastKeyFrameSeen.Store(time.Time{})
 	stream.videoTracks = append(stream.videoTracks, t)
 	return t, nil
@@ -476,9 +481,14 @@ func Configure() {
 }
 
 type StreamStatusVideo struct {
-	RID              string    `json:"rid"`
-	PacketsReceived  uint64    `json:"packetsReceived"`
-	LastKeyFrameSeen time.Time `json:"lastKeyFrameSeen"`
+	RID               string    `json:"rid"`
+	Codec             string    `json:"codec"`
+	SSRC              uint32    `json:"ssrc"`
+	PacketsReceived   uint64    `json:"packetsReceived"`
+	BytesReceived     uint64    `json:"bytesReceived"`
+	FramesReceived    uint64    `json:"framesReceived"`
+	KeyframesReceived uint64    `json:"keyframesReceived"`
+	LastKeyFrameSeen  time.Time `json:"lastKeyFrameSeen"`
 }
 
 type StreamStatus struct {
@@ -491,11 +501,18 @@ type StreamStatus struct {
 }
 
 type whepSessionStatus struct {
-	ID             string `json:"id"`
-	CurrentLayer   string `json:"currentLayer"`
-	SequenceNumber uint16 `json:"sequenceNumber"`
-	Timestamp      uint32 `json:"timestamp"`
-	PacketsWritten uint64 `json:"packetsWritten"`
+	ID                        string `json:"id"`
+	CurrentLayer              string `json:"currentLayer"`
+	SequenceNumber            uint16 `json:"sequenceNumber"`
+	Timestamp                 uint32 `json:"timestamp"`
+	PacketsWritten            uint64 `json:"packetsWritten"`
+	BytesWritten              uint64 `json:"bytesWritten"`
+	FramesWritten             uint64 `json:"framesWritten"`
+	KeyframesWritten          uint64 `json:"keyframesWritten"`
+	PacketsDropped            uint64 `json:"packetsDropped"`
+	PacketsSkippedForKeyframe uint64 `json:"packetsSkippedForKeyframe"`
+	LayerSwitches             uint64 `json:"layerSwitches"`
+	SessionStartEpoch         uint64 `json:"sessionStartEpoch"`
 }
 
 func GetStreamStatuses() []StreamStatus {
@@ -514,11 +531,18 @@ func GetStreamStatuses() []StreamStatus {
 			}
 
 			whepSessions = append(whepSessions, whepSessionStatus{
-				ID:             id,
-				CurrentLayer:   currentLayer,
-				SequenceNumber: whepSession.sequenceNumber,
-				Timestamp:      whepSession.timestamp,
-				PacketsWritten: whepSession.packetsWritten,
+				ID:                        id,
+				CurrentLayer:              currentLayer,
+				SequenceNumber:            whepSession.sequenceNumber,
+				Timestamp:                 whepSession.timestamp,
+				PacketsWritten:            whepSession.packetsWritten,
+				BytesWritten:              whepSession.bytesWritten.Load(),
+				FramesWritten:             whepSession.framesWritten.Load(),
+				KeyframesWritten:          whepSession.keyframesWritten.Load(),
+				PacketsDropped:            whepSession.packetsDropped.Load(),
+				PacketsSkippedForKeyframe: whepSession.packetsSkippedForKeyframe.Load(),
+				LayerSwitches:             whepSession.layerSwitches.Load(),
+				SessionStartEpoch:         whepSession.sessionStartEpoch,
 			})
 		}
 		stream.whepSessionsLock.Unlock()
@@ -531,9 +555,14 @@ func GetStreamStatuses() []StreamStatus {
 			}
 
 			streamStatusVideo = append(streamStatusVideo, StreamStatusVideo{
-				RID:              videoTrack.rid,
-				PacketsReceived:  videoTrack.packetsReceived.Load(),
-				LastKeyFrameSeen: lastKeyFrameSeen,
+				RID:               videoTrack.rid,
+				Codec:             videoTrack.codec,
+				SSRC:              videoTrack.ssrc,
+				PacketsReceived:   videoTrack.packetsReceived.Load(),
+				BytesReceived:     videoTrack.bytesReceived.Load(),
+				FramesReceived:    videoTrack.framesReceived.Load(),
+				KeyframesReceived: videoTrack.keyframesReceived.Load(),
+				LastKeyFrameSeen:  lastKeyFrameSeen,
 			})
 		}
 

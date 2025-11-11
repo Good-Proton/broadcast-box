@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync/atomic"
+	"time"
 
 	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/glimesh/broadcast-box/internal/logger"
@@ -17,12 +18,19 @@ import (
 
 type (
 	whepSession struct {
-		videoTrack         *trackMultiCodec
-		currentLayer       atomic.Value
-		waitingForKeyframe atomic.Bool
-		sequenceNumber     uint16
-		timestamp          uint32
-		packetsWritten     uint64
+		videoTrack                *trackMultiCodec
+		currentLayer              atomic.Value
+		waitingForKeyframe        atomic.Bool
+		sequenceNumber            uint16
+		timestamp                 uint32
+		packetsWritten            uint64
+		bytesWritten              atomic.Uint64
+		framesWritten             atomic.Uint64
+		keyframesWritten          atomic.Uint64
+		packetsDropped            atomic.Uint64
+		packetsSkippedForKeyframe atomic.Uint64
+		layerSwitches             atomic.Uint64
+		sessionStartEpoch         uint64
 	}
 
 	simulcastLayerResponse struct {
@@ -66,6 +74,10 @@ func WHEPChangeLayer(whepSessionId, layer string) error {
 		defer streamMap[streamKey].whepSessionsLock.Unlock()
 
 		if _, ok := streamMap[streamKey].whepSessions[whepSessionId]; ok {
+			oldLayer := streamMap[streamKey].whepSessions[whepSessionId].currentLayer.Load()
+			if oldLayer != nil && oldLayer.(string) != layer {
+				streamMap[streamKey].whepSessions[whepSessionId].layerSwitches.Add(1)
+			}
 			streamMap[streamKey].whepSessions[whepSessionId].currentLayer.Store(layer)
 			streamMap[streamKey].whepSessions[whepSessionId].waitingForKeyframe.Store(true)
 			streamMap[streamKey].pliChan <- true
@@ -180,8 +192,9 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	defer stream.whepSessionsLock.Unlock()
 
 	stream.whepSessions[whepSessionId] = &whepSession{
-		videoTrack: videoTrack,
-		timestamp:  50000,
+		videoTrack:        videoTrack,
+		timestamp:         50000,
+		sessionStartEpoch: uint64(time.Now().Unix()),
 	}
 	stream.whepSessions[whepSessionId].currentLayer.Store("")
 	stream.whepSessions[whepSessionId].waitingForKeyframe.Store(false)
@@ -190,16 +203,22 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 }
 
 func (w *whepSession) sendVideoPacket(rtpPkt *rtp.Packet, layer string, timeDiff int64, sequenceDiff int, codec videoTrackCodec, isKeyframe bool) {
-	if w.currentLayer.Load() == "" {
+	currentLayer := w.currentLayer.Load()
+	if currentLayer == "" {
 		w.currentLayer.Store(layer)
-	} else if layer != w.currentLayer.Load() {
+	} else if layer != currentLayer {
 		return
 	} else if w.waitingForKeyframe.Load() {
 		if !isKeyframe {
+			w.packetsSkippedForKeyframe.Add(1)
 			return
 		}
 
 		w.waitingForKeyframe.Store(false)
+	}
+
+	if currentLayer != "" && layer != currentLayer.(string) {
+		w.layerSwitches.Add(1)
 	}
 
 	w.packetsWritten += 1
@@ -209,7 +228,19 @@ func (w *whepSession) sendVideoPacket(rtpPkt *rtp.Packet, layer string, timeDiff
 	rtpPkt.SequenceNumber = w.sequenceNumber
 	rtpPkt.Timestamp = w.timestamp
 
+	packetSize := uint64(rtpPkt.MarshalSize())
+	w.bytesWritten.Add(packetSize)
+
+	if rtpPkt.Marker {
+		w.framesWritten.Add(1)
+	}
+
+	if isKeyframe {
+		w.keyframesWritten.Add(1)
+	}
+
 	if err := w.videoTrack.WriteRTP(rtpPkt, codec); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		w.packetsDropped.Add(1)
 		logger.Error(
 			"Failed to write RTP packet",
 			zap.Error(err),

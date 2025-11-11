@@ -43,7 +43,10 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		id = videoTrackLabelDefault
 	}
 
-	videoTrack, err := addTrack(s, id, sessionId)
+	codecMimeType := remoteTrack.Codec().MimeType
+	ssrc := uint32(remoteTrack.SSRC())
+
+	videoTrack, err := addTrack(s, id, sessionId, codecMimeType, ssrc)
 	if err != nil {
 		logger.Error("Failed to add video track",
 			zap.Error(err),
@@ -114,10 +117,16 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		}
 
 		videoTrack.packetsReceived.Add(1)
+		videoTrack.bytesReceived.Add(uint64(rtpRead))
+
+		if rtpPkt.Marker {
+			videoTrack.framesReceived.Add(1)
+		}
 
 		// Keyframe detection has only been implemented for H264
 		isKeyframe := isKeyframe(rtpPkt, codec, depacketizer)
 		if isKeyframe && codec == videoTrackCodecH264 {
+			videoTrack.keyframesReceived.Add(1)
 			videoTrack.lastKeyFrameSeen.Store(time.Now())
 		}
 
