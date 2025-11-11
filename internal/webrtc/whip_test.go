@@ -5,17 +5,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glimesh/broadcast-box/internal/auth"
 	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/require"
 )
 
-const testStreamKey = "test"
+var testStreamInfo = &auth.StreamInfo{
+	StreamKey: "test",
+	LhUserId:  "",
+}
 
 func doesWHIPSessionExist() (ok bool) {
 	streamMapLock.Lock()
 	defer streamMapLock.Unlock()
 
-	_, ok = streamMap[testStreamKey]
+	_, ok = streamMap[testStreamInfo.StreamKey]
 	return
 }
 
@@ -48,7 +52,7 @@ func TestReconnect(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, firstPublisher.SetLocalDescription(offer))
 
-	answer, err := WHIP(offer.SDP, testStreamKey)
+	answer, err := WHIP(offer.SDP, testStreamInfo)
 	require.NoError(t, err)
 
 	require.NoError(t, firstPublisher.SetRemoteDescription(webrtc.SessionDescription{
@@ -79,7 +83,7 @@ func TestReconnect(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, secondPublisher.SetLocalDescription(offer))
 
-	answer, err = WHIP(offer.SDP, testStreamKey)
+	answer, err = WHIP(offer.SDP, testStreamInfo)
 	require.NoError(t, err)
 
 	require.NoError(t, secondPublisher.SetRemoteDescription(webrtc.SessionDescription{
