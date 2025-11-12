@@ -33,8 +33,8 @@ type (
 		layerSwitches             atomic.Uint64
 		sessionStartEpoch         uint64
 		connectionEstablishedTime atomic.Uint64
-		firstPacketTime           atomic.Uint64
-		lastPacketTime            atomic.Uint64
+		firstPacketTime           atomic.Value
+		lastPacketTime            atomic.Value
 		iceConnectionState        atomic.Value
 	}
 
@@ -214,8 +214,8 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	stream.whepSessions[whepSessionId].currentLayer.Store("")
 	stream.whepSessions[whepSessionId].waitingForKeyframe.Store(false)
 	stream.whepSessions[whepSessionId].iceConnectionState.Store("new")
-	stream.whepSessions[whepSessionId].firstPacketTime.Store(uint64(0))
-	stream.whepSessions[whepSessionId].lastPacketTime.Store(uint64(0))
+	stream.whepSessions[whepSessionId].firstPacketTime.Store(time.Time{})
+	stream.whepSessions[whepSessionId].lastPacketTime.Store(time.Time{})
 
 	return maybePrintOfferAnswer(appendAnswer(peerConnection.LocalDescription().SDP), false), whepSessionId, nil
 }
@@ -239,8 +239,8 @@ func (w *whepSession) sendVideoPacket(rtpPkt *rtp.Packet, layer string, timeDiff
 		w.layerSwitches.Add(1)
 	}
 
-	now := uint64(time.Now().Unix())
-	if w.firstPacketTime.Load() == 0 {
+	now := time.Now()
+	if firstPacket, ok := w.firstPacketTime.Load().(time.Time); !ok || firstPacket.IsZero() {
 		w.firstPacketTime.Store(now)
 	}
 	w.lastPacketTime.Store(now)

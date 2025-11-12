@@ -552,22 +552,22 @@ type StreamStatus struct {
 }
 
 type whepSessionStatus struct {
-	ID                        string `json:"id"`
-	CurrentLayer              string `json:"currentLayer"`
-	SequenceNumber            uint16 `json:"sequenceNumber"`
-	Timestamp                 uint32 `json:"timestamp"`
-	PacketsWritten            uint64 `json:"packetsWritten"`
-	BytesWritten              uint64 `json:"bytesWritten"`
-	FramesWritten             uint64 `json:"framesWritten"`
-	KeyframesWritten          uint64 `json:"keyframesWritten"`
-	PacketsDropped            uint64 `json:"packetsDropped"`
-	PacketsSkippedForKeyframe uint64 `json:"packetsSkippedForKeyframe"`
-	LayerSwitches             uint64 `json:"layerSwitches"`
-	SessionStartEpoch         uint64 `json:"sessionStartEpoch"`
-	ConnectionEstablishedTime uint64 `json:"connectionEstablishedTime"`
-	FirstPacketTime           uint64 `json:"firstPacketTime"`
-	LastPacketTime            uint64 `json:"lastPacketTime"`
-	ICEConnectionState        string `json:"iceConnectionState"`
+	ID                        string    `json:"id"`
+	CurrentLayer              string    `json:"currentLayer"`
+	SequenceNumber            uint16    `json:"sequenceNumber"`
+	Timestamp                 uint32    `json:"timestamp"`
+	PacketsWritten            uint64    `json:"packetsWritten"`
+	BytesWritten              uint64    `json:"bytesWritten"`
+	FramesWritten             uint64    `json:"framesWritten"`
+	KeyframesWritten          uint64    `json:"keyframesWritten"`
+	PacketsDropped            uint64    `json:"packetsDropped"`
+	PacketsSkippedForKeyframe uint64    `json:"packetsSkippedForKeyframe"`
+	LayerSwitches             uint64    `json:"layerSwitches"`
+	SessionStartEpoch         uint64    `json:"sessionStartEpoch"`
+	ConnectionEstablishedTime uint64    `json:"connectionEstablishedTime"`
+	FirstPacketTime           time.Time `json:"firstPacketTime"`
+	LastPacketTime            time.Time `json:"lastPacketTime"`
+	ICEConnectionState        string    `json:"iceConnectionState"`
 }
 
 func GetStreamStatuses() []StreamStatus {
@@ -587,6 +587,14 @@ func GetStreamStatuses() []StreamStatus {
 
 			iceState, _ := whepSession.iceConnectionState.Load().(string)
 
+			var firstPacketTime, lastPacketTime time.Time
+			if v, ok := whepSession.firstPacketTime.Load().(time.Time); ok {
+				firstPacketTime = v
+			}
+			if v, ok := whepSession.lastPacketTime.Load().(time.Time); ok {
+				lastPacketTime = v
+			}
+
 			whepSessions = append(whepSessions, whepSessionStatus{
 				ID:                        id,
 				CurrentLayer:              currentLayer,
@@ -601,8 +609,8 @@ func GetStreamStatuses() []StreamStatus {
 				LayerSwitches:             whepSession.layerSwitches.Load(),
 				SessionStartEpoch:         whepSession.sessionStartEpoch,
 				ConnectionEstablishedTime: whepSession.connectionEstablishedTime.Load(),
-				FirstPacketTime:           whepSession.firstPacketTime.Load(),
-				LastPacketTime:            whepSession.lastPacketTime.Load(),
+				FirstPacketTime:           firstPacketTime,
+				LastPacketTime:            lastPacketTime,
 				ICEConnectionState:        iceState,
 			})
 		}
