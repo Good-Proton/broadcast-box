@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -57,59 +56,59 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		return
 	}
 
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
+	// go func() {
+	// 	ticker := time.NewTicker(1 * time.Second)
+	// 	defer ticker.Stop()
 
-		for {
-			select {
-			case <-stream.whipActiveContext.Done():
-				return
-			case <-ticker.C:
-				if receiver == nil {
-					continue
-				}
+	// 	for {
+	// 		select {
+	// 		case <-stream.whipActiveContext.Done():
+	// 			return
+	// 		case <-ticker.C:
+	// 			if receiver == nil {
+	// 				continue
+	// 			}
 
-				now := time.Now()
-				rtcpPackets, _, err := receiver.ReadRTCP()
-				if err != nil {
-					break
-				}
+	// 			now := time.Now()
+	// 			rtcpPackets, _, err := receiver.ReadRTCP()
+	// 			if err != nil {
+	// 				break
+	// 			}
 
-				for _, pkt := range rtcpPackets {
-					switch rtcpPkt := pkt.(type) {
-					case *rtcp.SenderReport:
-						if rtcpPkt.SSRC == ssrc {
-							videoTrack.lastRTCPTime.Store(now)
-							logger.Debug("Received SenderReport",
-								zap.Uint32("ssrc", ssrc),
-								zap.String("rid", id),
-							)
-						}
-					case *rtcp.ReceiverReport:
-						logger.Debug("Received ReceiverReport",
-							zap.Uint32("ssrc", ssrc),
-							zap.String("rid", id),
-						)
-						for _, report := range rtcpPkt.Reports {
-							if report.SSRC == ssrc {
-								videoTrack.jitter.Store(uint64(report.Jitter))
-								videoTrack.delay.Store(uint64(report.Delay))
-								videoTrack.totalLost.Store(uint64(report.TotalLost))
-								videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
-								videoTrack.lastRTCPTime.Store(now)
-							}
-						}
-					default:
-						logger.Debug("Received unknown RTCP packet type",
-							zap.String("type", fmt.Sprintf("%T", pkt)),
-							zap.String("rid", id),
-						)
-					}
-				}
-			}
-		}
-	}()
+	// 			for _, pkt := range rtcpPackets {
+	// 				switch rtcpPkt := pkt.(type) {
+	// 				case *rtcp.SenderReport:
+	// 					if rtcpPkt.SSRC == ssrc {
+	// 						videoTrack.lastRTCPTime.Store(now)
+	// 						logger.Debug("Received SenderReport",
+	// 							zap.Uint32("ssrc", ssrc),
+	// 							zap.String("rid", id),
+	// 						)
+	// 					}
+	// 				case *rtcp.ReceiverReport:
+	// 					logger.Debug("Received ReceiverReport",
+	// 						zap.Uint32("ssrc", ssrc),
+	// 						zap.String("rid", id),
+	// 					)
+	// 					for _, report := range rtcpPkt.Reports {
+	// 						if report.SSRC == ssrc {
+	// 							videoTrack.jitter.Store(uint64(report.Jitter))
+	// 							videoTrack.delay.Store(uint64(report.Delay))
+	// 							videoTrack.totalLost.Store(uint64(report.TotalLost))
+	// 							videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
+	// 							videoTrack.lastRTCPTime.Store(now)
+	// 						}
+	// 					}
+	// 				default:
+	// 					logger.Debug("Received unknown RTCP packet type",
+	// 						zap.String("type", fmt.Sprintf("%T", pkt)),
+	// 						zap.String("rid", id),
+	// 					)
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }()
 
 	go func() {
 		for {
