@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -327,4 +328,36 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 
 	<-gatherComplete
 	return maybePrintOfferAnswer(appendAnswer(peerConnection.LocalDescription().SDP), false), nil
+}
+
+func WHIPDelete(streamInfo *auth.StreamInfo) error {
+	streamMapLock.Lock()
+	stream, ok := streamMap[streamInfo.StreamKey]
+	if !ok {
+		streamMapLock.Unlock()
+		return fmt.Errorf("stream not found: %s", streamInfo.StreamKey)
+	}
+
+	sessionId := stream.sessionId
+	publisherConnection := stream.publisherConnection
+	streamMapLock.Unlock()
+
+	if publisherConnection != nil {
+		if err := publisherConnection.Close(); err != nil {
+			logger.Error("Failed to close WHIP peer connection",
+				zap.Error(err),
+				zap.String("streamKey", streamInfo.StreamKey),
+			)
+			return err
+		}
+	}
+
+	peerConnectionDisconnected(true, streamInfo.StreamKey, sessionId)
+
+	logger.Info("WHIP session deleted via DELETE request",
+		zap.String("streamKey", streamInfo.StreamKey),
+		zap.String("sessionId", sessionId),
+	)
+
+	return nil
 }

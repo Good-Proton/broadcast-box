@@ -57,12 +57,12 @@ func GetStreamInfo(action string, r *http.Request) (*StreamInfo, error) {
 			return nil, err
 		}
 
-		if action == "whip-connect" && jwtPayload.AccessType != "whip" {
+		if strings.HasPrefix(action, "whip") && jwtPayload.AccessType != "whip" {
 			logger.Error("JWT access type invalid for WHIP", zap.String("accessType", jwtPayload.AccessType))
 			return nil, errInvalidStreamKey
 		}
 
-		if action == "whep-connect" && jwtPayload.AccessType != "whep" {
+		if strings.HasPrefix(action, "whep") && jwtPayload.AccessType != "whep" {
 			logger.Error("JWT access type invalid for WHEP", zap.String("accessType", jwtPayload.AccessType))
 			return nil, errInvalidStreamKey
 		}

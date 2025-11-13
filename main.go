@@ -50,65 +50,89 @@ type (
 	StreamInfoVerifier func(action string, r *http.Request) (*auth.StreamInfo, error)
 )
 
-func logHTTPError(w http.ResponseWriter, err error, code int) {
-	logger.Error("HTTP error", zap.Error(err), zap.Int("status_code", code))
+func logHTTPError(w http.ResponseWriter, r *http.Request, err error, code int) {
+	logger.Error("HTTP error",
+		zap.Error(err),
+		zap.Int("status_code", code),
+		zap.String("method", r.Method),
+		zap.String("url", r.URL.String()),
+	)
 	http.Error(w, err.Error(), code)
 }
 
-func whipHandler(res http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		logHTTPError(res, errors.New("invalid request method: "+r.Method), http.StatusBadRequest)
-		return
-	}
+func whipHandler(res http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case "POST":
+		streamInfo, err := auth.GetStreamInfo("whip-connect", req)
+		if err != nil {
+			logHTTPError(res, req, err, http.StatusBadRequest)
+			return
+		}
 
-	streamInfo, err := auth.GetStreamInfo("whip-connect", r)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
+		offer, err := io.ReadAll(req.Body)
+		if err != nil {
+			logHTTPError(res, req, err, http.StatusBadRequest)
+			return
+		}
 
-	offer, err := io.ReadAll(r.Body)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
+		answer, err := webrtc.WHIP(string(offer), streamInfo)
+		if err != nil {
+			logHTTPError(res, req, err, http.StatusBadRequest)
+			return
+		}
 
-	answer, err := webrtc.WHIP(string(offer), streamInfo)
-	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
-		return
-	}
+		res.Header().Add("Location", "/api/whip")
+		res.Header().Add("Content-Type", "application/sdp")
+		res.WriteHeader(http.StatusCreated)
+		if _, err = fmt.Fprint(res, answer); err != nil {
+			logger.Error("Failed to write WHIP response", zap.Error(err))
+		}
 
-	res.Header().Add("Location", "/api/whip")
-	res.Header().Add("Content-Type", "application/sdp")
-	res.WriteHeader(http.StatusCreated)
-	if _, err = fmt.Fprint(res, answer); err != nil {
-		logger.Error("Failed to write WHIP response", zap.Error(err))
+	case "DELETE":
+		streamInfo, err := auth.GetStreamInfo("whip-disconnect", req)
+		if err != nil {
+			logHTTPError(res, req, err, http.StatusBadRequest)
+			return
+		}
+
+		if err := webrtc.WHIPDelete(streamInfo); err != nil {
+			logHTTPError(res, req, err, http.StatusInternalServerError)
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		logger.Info("WHIP session ended via DELETE",
+			zap.String("streamKey", streamInfo.StreamKey),
+			zap.String("lhUserId", streamInfo.LhUserId),
+		)
+
+	default:
+		logHTTPError(res, req, errors.New("invalid request method: "+req.Method), http.StatusBadRequest)
 	}
 }
 
 func whepHandlerFactory(streamInfoVerifier StreamInfoVerifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {
-			logHTTPError(res, errors.New("invalid request method: "+req.Method), http.StatusBadRequest)
+			logHTTPError(res, req, errors.New("invalid request method: "+req.Method), http.StatusBadRequest)
 			return
 		}
 
 		streamInfo, err := streamInfoVerifier("whep-connect", req)
 		if err != nil {
-			logHTTPError(res, err, http.StatusBadRequest)
+			logHTTPError(res, req, err, http.StatusBadRequest)
 			return
 		}
 
 		offer, err := io.ReadAll(req.Body)
 		if err != nil {
-			logHTTPError(res, err, http.StatusBadRequest)
+			logHTTPError(res, req, err, http.StatusBadRequest)
 			return
 		}
 
 		answer, whepSessionId, err := webrtc.WHEP(string(offer), streamInfo)
 		if err != nil {
-			logHTTPError(res, err, http.StatusBadRequest)
+			logHTTPError(res, req, err, http.StatusBadRequest)
 			return
 		}
 
@@ -138,7 +162,7 @@ func whepServerSentEventsHandler(res http.ResponseWriter, req *http.Request) {
 
 	layers, err := webrtc.WHEPLayers(whepSessionId)
 	if err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
+		logHTTPError(res, req, err, http.StatusBadRequest)
 		return
 	}
 
@@ -150,7 +174,7 @@ func whepServerSentEventsHandler(res http.ResponseWriter, req *http.Request) {
 func whepLayerHandler(res http.ResponseWriter, req *http.Request) {
 	var r whepLayerRequestJSON
 	if err := json.NewDecoder(req.Body).Decode(&r); err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
+		logHTTPError(res, req, err, http.StatusBadRequest)
 		return
 	}
 
@@ -158,26 +182,26 @@ func whepLayerHandler(res http.ResponseWriter, req *http.Request) {
 	whepSessionId := vals[len(vals)-1]
 
 	if err := webrtc.WHEPChangeLayer(whepSessionId, r.EncodingId); err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
+		logHTTPError(res, req, err, http.StatusBadRequest)
 		return
 	}
 }
 
 func statusHandler(res http.ResponseWriter, req *http.Request) {
 	if os.Getenv("DISABLE_STATUS") == "true" {
-		logHTTPError(res, errors.New("status Service Unavailable"), http.StatusServiceUnavailable)
+		logHTTPError(res, req, errors.New("status Service Unavailable"), http.StatusServiceUnavailable)
 		return
 	}
 
 	config, err := config.GetAppConfig()
 	if err != nil {
-		logHTTPError(res, err, http.StatusInternalServerError)
+		logHTTPError(res, req, err, http.StatusInternalServerError)
 		return
 	}
 	if config.StatusAuthToken != "" {
 		authHeader := req.Header.Get("Authorization")
 		if authHeader != fmt.Sprintf("Bearer %s", config.StatusAuthToken) {
-			logHTTPError(res, errors.New("unauthorized"), http.StatusUnauthorized)
+			logHTTPError(res, req, errors.New("unauthorized"), http.StatusUnauthorized)
 			return
 		}
 	}
@@ -185,7 +209,7 @@ func statusHandler(res http.ResponseWriter, req *http.Request) {
 	res.Header().Add("Content-Type", "application/json")
 
 	if err := json.NewEncoder(res).Encode(webrtc.GetStreamStatuses()); err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
+		logHTTPError(res, req, err, http.StatusBadRequest)
 	}
 }
 
@@ -199,7 +223,7 @@ func indexHTMLWhenNotFound(fs http.FileSystem) http.Handler {
 				http.ServeFile(resp, req, "./web/build/index.html")
 				return
 			} else {
-				logHTTPError(resp, err, http.StatusInternalServerError)
+				logHTTPError(resp, req, err, http.StatusInternalServerError)
 				return
 			}
 		}
@@ -212,21 +236,21 @@ func healthCheckHandler(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(http.StatusOK)
 
 	if err := json.NewEncoder(res).Encode(httpSimpleResponse{Message: "OK"}); err != nil {
-		logHTTPError(res, err, http.StatusBadRequest)
+		logHTTPError(res, req, err, http.StatusBadRequest)
 	}
 }
 
 func metricsHandler(res http.ResponseWriter, req *http.Request) {
 	config, err := config.GetAppConfig()
 	if err != nil {
-		logHTTPError(res, err, http.StatusInternalServerError)
+		logHTTPError(res, req, err, http.StatusInternalServerError)
 		return
 	}
 
 	if config.StatusAuthToken != "" {
 		authHeader := req.Header.Get("Authorization")
 		if authHeader != fmt.Sprintf("Bearer %s", config.StatusAuthToken) {
-			logHTTPError(res, errors.New("unauthorized"), http.StatusUnauthorized)
+			logHTTPError(res, req, errors.New("unauthorized"), http.StatusUnauthorized)
 			return
 		}
 	}
