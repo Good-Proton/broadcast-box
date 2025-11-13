@@ -247,6 +247,46 @@ var (
 		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
 	)
 
+	whepSessionRTT = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_rtt_milliseconds",
+			Help: "Round-trip time in milliseconds from RTCP Receiver Reports",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
+	whepSessionJitter = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_jitter",
+			Help: "Jitter value from RTCP Receiver Reports",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
+	whepSessionDelay = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_delay",
+			Help: "Delay from RTCP Receiver Reports",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
+	whepSessionTotalLost = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_total_lost",
+			Help: "Total packets lost from RTCP Receiver Reports",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
+	whepSessionLastSenderReport = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_last_sender_report",
+			Help: "Last sender report timestamp from RTCP Receiver Reports",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
 	activeStreamsCount = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_active_streams_total",
@@ -297,6 +337,11 @@ func UpdateMetrics() {
 	whepSessionLayerSwitches.Reset()
 	whepSessionStartEpoch.Reset()
 	whepSessionConnectionEstablishedTime.Reset()
+	whepSessionRTT.Reset()
+	whepSessionJitter.Reset()
+	whepSessionDelay.Reset()
+	whepSessionTotalLost.Reset()
+	whepSessionLastSenderReport.Reset()
 	activeWhepSessionsCount.Reset()
 
 	activeStreamsCount.Set(float64(len(statuses)))
@@ -342,6 +387,11 @@ func UpdateMetrics() {
 			whepSessionLayerSwitches.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.LayerSwitches))
 			whepSessionStartEpoch.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.SessionStartEpoch))
 			whepSessionConnectionEstablishedTime.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.ConnectionEstablishedTime))
+			whepSessionRTT.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.RTT))
+			whepSessionJitter.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.Jitter))
+			whepSessionDelay.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.Delay))
+			whepSessionTotalLost.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.TotalLost))
+			whepSessionLastSenderReport.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.LastSenderReport))
 		}
 	}
 }
