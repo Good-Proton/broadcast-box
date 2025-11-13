@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -73,7 +72,7 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 				now := time.Now()
 				rtcpPackets, _, err := receiver.ReadRTCP()
 				if err != nil {
-					logger.Error("Failed to read RTCP packets",
+					logger.Debug("Failed to read whip RTCP packets",
 						zap.Error(err),
 						zap.String("rid", id),
 						zap.String("sessionId", sessionId),
@@ -81,46 +80,33 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 					break
 				}
 
-				logger.Debug("Received rtcpPackets",
-					zap.Int("ssrc", len(rtcpPackets)),
+				logger.Debug("Received whip rtcpPackets",
+					zap.Int("length", len(rtcpPackets)),
 					zap.String("rid", id),
 					zap.String("sessionId", sessionId),
 				)
 
 				for _, pkt := range rtcpPackets {
 					switch rtcpPkt := pkt.(type) {
-					case *rtcp.ExtendedReport:
-						logger.Debug("Received ExtendedReport",
-							zap.Uint32("ssrc", ssrc),
-							zap.String("rid", id),
-						)
 					case *rtcp.SenderReport:
-						logger.Debug("Received SenderReport",
+						logger.Debug("Received whip SenderReport",
 							zap.Uint32("ssrc", ssrc),
 							zap.String("rid", id),
-						)
-						if rtcpPkt.SSRC == ssrc {
-							videoTrack.lastRTCPTime.Store(now)
-						}
-					case *rtcp.ReceiverReport:
-						logger.Debug("Received ReceiverReport",
-							zap.Uint32("ssrc", ssrc),
-							zap.String("rid", id),
+							zap.String("sessionId", sessionId),
 						)
 						for _, report := range rtcpPkt.Reports {
-							if report.SSRC == ssrc {
+							currentLastReport := uint32(videoTrack.lastSenderReport.Load())
+
+							if report.SSRC == ssrc && currentLastReport < report.LastSenderReport {
 								videoTrack.jitter.Store(uint64(report.Jitter))
 								videoTrack.delay.Store(uint64(report.Delay))
 								videoTrack.totalLost.Store(uint64(report.TotalLost))
 								videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
 								videoTrack.lastRTCPTime.Store(now)
+
+								break
 							}
 						}
-					default:
-						logger.Debug("Received unknown RTCP packet type",
-							zap.String("type", fmt.Sprintf("%T", pkt)),
-							zap.String("rid", id),
-						)
 					}
 				}
 			}

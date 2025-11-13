@@ -568,6 +568,13 @@ type whepSessionStatus struct {
 	FirstPacketTime           time.Time `json:"firstPacketTime"`
 	LastPacketTime            time.Time `json:"lastPacketTime"`
 	ICEConnectionState        string    `json:"iceConnectionState"`
+
+	RTT              uint64    `json:"rtt"`
+	Jitter           uint64    `json:"jitter"`
+	LastRTCPTime     time.Time `json:"lastRTCPTime"`
+	Delay            uint64    `json:"delay"`
+	TotalLost        uint64    `json:"totalLost"`
+	LastSenderReport uint64    `json:"lastSenderReport"`
 }
 
 func GetStreamStatuses() []StreamStatus {
@@ -587,12 +594,15 @@ func GetStreamStatuses() []StreamStatus {
 
 			iceState, _ := whepSession.iceConnectionState.Load().(string)
 
-			var firstPacketTime, lastPacketTime time.Time
+			var firstPacketTime, lastPacketTime, lastRTCPTime time.Time
 			if v, ok := whepSession.firstPacketTime.Load().(time.Time); ok {
 				firstPacketTime = v
 			}
 			if v, ok := whepSession.lastPacketTime.Load().(time.Time); ok {
 				lastPacketTime = v
+			}
+			if v, ok := whepSession.lastRTCPTime.Load().(time.Time); ok {
+				lastRTCPTime = v
 			}
 
 			whepSessions = append(whepSessions, whepSessionStatus{
@@ -612,6 +622,13 @@ func GetStreamStatuses() []StreamStatus {
 				FirstPacketTime:           firstPacketTime,
 				LastPacketTime:            lastPacketTime,
 				ICEConnectionState:        iceState,
+
+				Jitter:           whepSession.jitter.Load(),
+				RTT:              whepSession.rtt.Load(),
+				LastRTCPTime:     lastRTCPTime,
+				Delay:            whepSession.delay.Load(),
+				TotalLost:        whepSession.totalLost.Load(),
+				LastSenderReport: whepSession.lastSenderReport.Load(),
 			})
 		}
 		stream.whepSessionsLock.RUnlock()

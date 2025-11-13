@@ -36,6 +36,13 @@ type (
 		firstPacketTime           atomic.Value
 		lastPacketTime            atomic.Value
 		iceConnectionState        atomic.Value
+
+		rtt              atomic.Uint64
+		jitter           atomic.Uint64
+		lastRTCPTime     atomic.Value
+		delay            atomic.Uint64
+		totalLost        atomic.Uint64
+		lastSenderReport atomic.Uint64
 	}
 
 	simulcastLayerResponse struct {
@@ -105,6 +112,8 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	whepSessionId := uuid.New().String()
 
 	videoTrack := &trackMultiCodec{id: "video", streamID: "pion"}
+	id := videoTrack.RID()
+	ssrc := uint32(videoTrack.ssrc)
 
 	peerConnection, err := newPeerConnection(apiWhep)
 	if err != nil {
@@ -120,7 +129,7 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 			}
 		}
 		stream.whepSessionsLock.Unlock()
-		
+
 		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
 			if err := peerConnection.Close(); err != nil {
 				logger.Error("Failed to close peer connection",
@@ -166,7 +175,17 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 		return "", "", err
 	}
 
+	session := &whepSession{
+		videoTrack:        videoTrack,
+		peerConnection:    peerConnection,
+		timestamp:         50000,
+		sessionStartEpoch: uint64(time.Now().Unix()),
+	}
+
 	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			rtcpPackets, _, rtcpErr := rtpSender.ReadRTCP()
 			if rtcpErr != nil {
@@ -178,6 +197,58 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 					select {
 					case stream.pliChan <- true:
 					default:
+					}
+				}
+			}
+
+			for {
+				select {
+				case <-stream.whipActiveContext.Done():
+					return
+				case <-ticker.C:
+					if rtpSender == nil {
+						continue
+					}
+
+					now := time.Now()
+					rtcpPackets, _, err := rtpSender.ReadRTCP()
+					if err != nil {
+						logger.Debug("Failed to read whep RTCP packets",
+							zap.Error(err),
+							zap.String("rid", id),
+							zap.String("sessionId", whepSessionId),
+						)
+						break
+					}
+
+					logger.Debug("Received receiver rtcpPackets",
+						zap.Int("length", len(rtcpPackets)),
+						zap.String("rid", id),
+						zap.String("sessionId", whepSessionId),
+					)
+
+					for _, pkt := range rtcpPackets {
+						switch rtcpPkt := pkt.(type) {
+						case *rtcp.ReceiverReport:
+							logger.Debug("Received ReceiverReport",
+								zap.Uint32("ssrc", ssrc),
+								zap.String("rid", id),
+								zap.String("sessionId", whepSessionId),
+							)
+							for _, report := range rtcpPkt.Reports {
+								currentLastReport := uint32(session.lastSenderReport.Load())
+
+								if report.SSRC == ssrc && currentLastReport < report.LastSenderReport {
+									session.jitter.Store(uint64(report.Jitter))
+									session.delay.Store(uint64(report.Delay))
+									session.totalLost.Store(uint64(report.TotalLost))
+									session.lastSenderReport.Store(uint64(report.LastSenderReport))
+									session.lastRTCPTime.Store(now)
+
+									break
+								}
+							}
+						}
 					}
 				}
 			}
@@ -205,17 +276,12 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	stream.whepSessionsLock.Lock()
 	defer stream.whepSessionsLock.Unlock()
 
-	stream.whepSessions[whepSessionId] = &whepSession{
-		videoTrack:        videoTrack,
-		peerConnection:    peerConnection,
-		timestamp:         50000,
-		sessionStartEpoch: uint64(time.Now().Unix()),
-	}
-	stream.whepSessions[whepSessionId].currentLayer.Store("")
-	stream.whepSessions[whepSessionId].waitingForKeyframe.Store(false)
-	stream.whepSessions[whepSessionId].iceConnectionState.Store("new")
-	stream.whepSessions[whepSessionId].firstPacketTime.Store(time.Time{})
-	stream.whepSessions[whepSessionId].lastPacketTime.Store(time.Time{})
+	session.currentLayer.Store("")
+	session.waitingForKeyframe.Store(false)
+	session.iceConnectionState.Store("new")
+	session.firstPacketTime.Store(time.Time{})
+	session.lastPacketTime.Store(time.Time{})
+	stream.whepSessions[whepSessionId] = session
 
 	return maybePrintOfferAnswer(appendAnswer(peerConnection.LocalDescription().SDP), false), whepSessionId, nil
 }
