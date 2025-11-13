@@ -221,7 +221,7 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 						break
 					}
 
-					logger.Debug("Received receiver rtcpPackets",
+					logger.Debug("Received whep rtcpPackets",
 						zap.Int("length", len(rtcpPackets)),
 						zap.String("rid", id),
 						zap.String("sessionId", whepSessionId),
@@ -230,22 +230,34 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 					for _, pkt := range rtcpPackets {
 						switch rtcpPkt := pkt.(type) {
 						case *rtcp.ReceiverReport:
-							logger.Debug("Received ReceiverReport",
-								zap.Uint32("ssrc", ssrc),
-								zap.String("rid", id),
-								zap.String("sessionId", whepSessionId),
-							)
 							for _, report := range rtcpPkt.Reports {
+								logger.Debug("Received whep ReceiverReport",
+									zap.Uint32("ssrc", ssrc),
+									zap.Uint32("reportSsrc", report.SSRC),
+									zap.String("rid", id),
+									zap.String("sessionId", whepSessionId),
+								)
+
 								currentLastReport := uint32(session.lastSenderReport.Load())
 
-								if report.SSRC == ssrc && currentLastReport < report.LastSenderReport {
-									session.jitter.Store(uint64(report.Jitter))
-									session.delay.Store(uint64(report.Delay))
-									session.totalLost.Store(uint64(report.TotalLost))
-									session.lastSenderReport.Store(uint64(report.LastSenderReport))
-									session.lastRTCPTime.Store(now)
+								if report.SSRC == ssrc {
+									if currentLastReport <= report.LastSenderReport {
+										session.jitter.Store(uint64(report.Jitter))
+										session.delay.Store(uint64(report.Delay))
+										session.totalLost.Store(uint64(report.TotalLost))
+										session.lastSenderReport.Store(uint64(report.LastSenderReport))
+										session.lastRTCPTime.Store(now)
 
-									break
+										break
+									} else {
+										logger.Debug("Outdated ReceiverReport received",
+											zap.Uint32("currentLastReport", currentLastReport),
+											zap.Uint32("receivedLastReport", report.LastSenderReport),
+											zap.Uint32("ssrc", ssrc),
+											zap.String("rid", id),
+											zap.String("sessionId", whepSessionId),
+										)
+									}
 								}
 							}
 						}

@@ -89,22 +89,34 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 				for _, pkt := range rtcpPackets {
 					switch rtcpPkt := pkt.(type) {
 					case *rtcp.SenderReport:
-						logger.Debug("Received whip SenderReport",
-							zap.Uint32("ssrc", ssrc),
-							zap.String("rid", id),
-							zap.String("sessionId", sessionId),
-						)
 						for _, report := range rtcpPkt.Reports {
+							logger.Debug("Received whip SenderReport",
+								zap.Uint32("ssrc", ssrc),
+								zap.Uint32("reportSsrc", report.SSRC),
+								zap.String("rid", id),
+								zap.String("sessionId", sessionId),
+							)
+
 							currentLastReport := uint32(videoTrack.lastSenderReport.Load())
 
-							if report.SSRC == ssrc && currentLastReport < report.LastSenderReport {
-								videoTrack.jitter.Store(uint64(report.Jitter))
-								videoTrack.delay.Store(uint64(report.Delay))
-								videoTrack.totalLost.Store(uint64(report.TotalLost))
-								videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
-								videoTrack.lastRTCPTime.Store(now)
+							if report.SSRC == ssrc {
+								if currentLastReport <= report.LastSenderReport {
+									videoTrack.jitter.Store(uint64(report.Jitter))
+									videoTrack.delay.Store(uint64(report.Delay))
+									videoTrack.totalLost.Store(uint64(report.TotalLost))
+									videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
+									videoTrack.lastRTCPTime.Store(now)
 
-								break
+									break
+								} else {
+									logger.Debug("Outdated SenderReport received",
+										zap.Uint32("currentLastReport", currentLastReport),
+										zap.Uint32("receivedLastReport", report.LastSenderReport),
+										zap.Uint32("ssrc", ssrc),
+										zap.String("rid", id),
+										zap.String("sessionId", sessionId),
+									)
+								}
 							}
 						}
 					}
