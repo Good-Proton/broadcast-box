@@ -84,19 +84,20 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 					zap.Int("length", len(rtcpPackets)),
 					zap.String("rid", id),
 					zap.String("sessionId", sessionId),
+					zap.Uint32("ssrc", ssrc),
 				)
 
 				for _, pkt := range rtcpPackets {
 					switch rtcpPkt := pkt.(type) {
 					case *rtcp.SenderReport:
-						for _, report := range rtcpPkt.Reports {
-							logger.Debug("Received whip SenderReport",
-								zap.Uint32("ssrc", ssrc),
-								zap.Uint32("reportSsrc", report.SSRC),
-								zap.String("rid", id),
-								zap.String("sessionId", sessionId),
-							)
+						logger.Debug("Received whip SenderReport",
+							zap.Int("reportCount", len(rtcpPkt.Reports)),
+							zap.Uint32("ssrc", ssrc),
+							zap.String("rid", id),
+							zap.String("sessionId", sessionId),
+						)
 
+						for _, report := range rtcpPkt.Reports {
 							currentLastReport := uint32(videoTrack.lastSenderReport.Load())
 
 							if report.SSRC == ssrc {

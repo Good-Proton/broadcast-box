@@ -71,21 +71,20 @@ type (
 	}
 
 	videoTrack struct {
-		sessionId          string
-		rid                string
-		codec              string
-		ssrc               uint32
-		packetsReceived    atomic.Uint64
-		bytesReceived      atomic.Uint64
-		framesReceived     atomic.Uint64
-		keyframesReceived  atomic.Uint64
-		lastSequenceNumber atomic.Uint32
-		lastKeyFrameSeen   atomic.Value
-		firstPacketTime    atomic.Value
-		lastPacketTime     atomic.Value
-		startTime          uint64
-		width              atomic.Uint32
-		height             atomic.Uint32
+		sessionId         string
+		rid               string
+		codec             string
+		ssrc              uint32
+		packetsReceived   atomic.Uint64
+		bytesReceived     atomic.Uint64
+		framesReceived    atomic.Uint64
+		keyframesReceived atomic.Uint64
+		lastKeyFrameSeen  atomic.Value
+		firstPacketTime   atomic.Value
+		lastPacketTime    atomic.Value
+		startTime         uint64
+		width             atomic.Uint32
+		height            atomic.Uint32
 
 		rtt              atomic.Uint64
 		jitter           atomic.Uint64

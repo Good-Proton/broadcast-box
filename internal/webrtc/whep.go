@@ -112,8 +112,6 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 	whepSessionId := uuid.New().String()
 
 	videoTrack := &trackMultiCodec{id: "video", streamID: "pion"}
-	id := videoTrack.RID()
-	ssrc := uint32(videoTrack.ssrc)
 
 	peerConnection, err := newPeerConnection(apiWhep)
 	if err != nil {
@@ -211,6 +209,9 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 					}
 
 					now := time.Now()
+					sessionSSRC := uint32(session.videoTrack.ssrc)
+					id := session.videoTrack.RID()
+
 					rtcpPackets, _, err := rtpSender.ReadRTCP()
 					if err != nil {
 						logger.Debug("Failed to read whep RTCP packets",
@@ -221,26 +222,19 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 						break
 					}
 
-					logger.Debug("Received whep rtcpPackets",
-						zap.Int("length", len(rtcpPackets)),
-						zap.String("rid", id),
-						zap.String("sessionId", whepSessionId),
-					)
-
 					for _, pkt := range rtcpPackets {
 						switch rtcpPkt := pkt.(type) {
 						case *rtcp.ReceiverReport:
+							logger.Debug("Received whep ReceiverReport",
+								zap.Int("reportsCount", len(rtcpPkt.Reports)),
+								zap.Uint32("sessionSSRC", sessionSSRC),
+								zap.String("rid", id),
+								zap.String("sessionId", whepSessionId),
+							)
 							for _, report := range rtcpPkt.Reports {
-								logger.Debug("Received whep ReceiverReport",
-									zap.Uint32("ssrc", ssrc),
-									zap.Uint32("reportSsrc", report.SSRC),
-									zap.String("rid", id),
-									zap.String("sessionId", whepSessionId),
-								)
+								if report.SSRC == sessionSSRC {
+									currentLastReport := uint32(session.lastSenderReport.Load())
 
-								currentLastReport := uint32(session.lastSenderReport.Load())
-
-								if report.SSRC == ssrc {
 									if currentLastReport <= report.LastSenderReport {
 										session.jitter.Store(uint64(report.Jitter))
 										session.delay.Store(uint64(report.Delay))
@@ -253,7 +247,7 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 										logger.Debug("Outdated ReceiverReport received",
 											zap.Uint32("currentLastReport", currentLastReport),
 											zap.Uint32("receivedLastReport", report.LastSenderReport),
-											zap.Uint32("ssrc", ssrc),
+											zap.Uint32("ssrc", report.SSRC),
 											zap.String("rid", id),
 											zap.String("sessionId", whepSessionId),
 										)
