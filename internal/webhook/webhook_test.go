@@ -11,11 +11,15 @@ import (
 
 	"github.com/glimesh/broadcast-box/internal/config"
 	"github.com/glimesh/broadcast-box/internal/logger"
+	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
 	logger.MustInitialize()
-	config.LoadConfig()
+	_, err := config.LoadConfig()
+	if err != nil {
+		logger.Fatal("Failed to load config: ", zap.Error(err))
+	}
 
 	code := m.Run()
 

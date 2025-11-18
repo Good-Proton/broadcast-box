@@ -282,6 +282,13 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 					zap.String("iceState", i.String()),
 				)
 			}
+
+			logger.Info("Disconnecting peer connection",
+				zap.String("side", "whip"),
+				zap.String("reason", "ICE connection state changed"),
+				zap.String("streamKey", streamInfo.StreamKey),
+				zap.String("iceState", i.String()),
+			)
 			peerConnectionDisconnected(true, streamInfo.StreamKey, whipSessionId)
 		}
 	})
@@ -352,12 +359,12 @@ func WHIPDelete(streamInfo *auth.StreamInfo) error {
 		}
 	}
 
-	peerConnectionDisconnected(true, streamInfo.StreamKey, sessionId)
-
-	logger.Info("WHIP session deleted via DELETE request",
+	logger.Info("Closing peer connection",
+		zap.String("side", "whip"),
+		zap.String("reason", "WHIP DELETE request"),
 		zap.String("streamKey", streamInfo.StreamKey),
-		zap.String("sessionId", sessionId),
 	)
+	peerConnectionDisconnected(true, streamInfo.StreamKey, sessionId)
 
 	return nil
 }

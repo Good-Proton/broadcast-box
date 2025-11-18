@@ -137,6 +137,12 @@ func WHEP(offer string, streamInfo *auth.StreamInfo) (string, string, error) {
 				)
 			}
 
+			logger.Info("Disconnecting peer connection",
+				zap.String("side", "whep"),
+				zap.String("reason", "ICE connection state changed"),
+				zap.String("streamKey", streamInfo.StreamKey),
+				zap.String("iceState", i.String()),
+			)
 			peerConnectionDisconnected(false, streamInfo.StreamKey, whepSessionId)
 		}
 	})
