@@ -243,6 +243,8 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 }
 
 func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
+	logger.Info("Creating WHIP session", zap.String("streamKey", streamInfo.StreamKey), zap.String("lhUserId", streamInfo.LhUserId))
+
 	maybePrintOfferAnswer(offer, true)
 
 	whipSessionId := uuid.New().String()
