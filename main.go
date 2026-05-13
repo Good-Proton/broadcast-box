@@ -19,15 +19,11 @@ import (
 	"github.com/glimesh/broadcast-box/internal/metrics"
 	"github.com/glimesh/broadcast-box/internal/networktest"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
-	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
 const (
-	envFileProd = ".env.production"
-	envFileDev  = ".env.development"
-
 	networkTestIntroMessage   = "\033[0;33mNETWORK_TEST_ON_START is enabled. If the test fails Broadcast Box will exit.\nSee the README for how to debug or disable NETWORK_TEST_ON_START\033[0m"
 	networkTestSuccessMessage = "\033[0;32mNetwork Test passed.\nHave fun using Broadcast Box.\033[0m"
 	networkTestFailedMessage  = "\033[0;31mNetwork Test failed.\n%s\nPlease see the README and join Discord for help\033[0m"
@@ -273,21 +269,13 @@ func corsHandler(next func(w http.ResponseWriter, r *http.Request)) http.Handler
 }
 
 func loadConfigs() error {
-	if os.Getenv("APP_ENV") == "development" {
-		logger.Info("Loading development config", zap.String("file", envFileDev))
-		return godotenv.Load(envFileDev)
-	} else {
-		logger.Info("Loading production config", zap.String("file", envFileProd))
-		if err := godotenv.Load(envFileProd); err != nil {
-			return err
-		}
-
+	if os.Getenv("APP_ENV") != "development" {
 		if _, err := os.Stat("./web/build"); os.IsNotExist(err) && os.Getenv("DISABLE_FRONTEND") != "true" {
 			return errNoBuildDirectoryErr
 		}
-
-		return nil
 	}
+
+	return nil
 }
 
 func main() {
