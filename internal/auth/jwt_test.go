@@ -95,11 +95,11 @@ func TestVerifyJwtToken(t *testing.T) {
 		require.Equal(t, expectedClaims.LhUserId, payload.LhUserId)
 		require.Equal(t, expectedClaims.AccessType, payload.AccessType)
 		require.Equal(t, expectedClaims.WorkerIp, payload.WorkerIp)
-		require.Equal(t, expectedClaims.RegisteredClaims.Subject, payload.RegisteredClaims.Subject)
-		require.NotNil(t, payload.RegisteredClaims.ExpiresAt)
-		require.NotNil(t, payload.RegisteredClaims.IssuedAt)
-		require.WithinDuration(t, expectedClaims.RegisteredClaims.ExpiresAt.Time, payload.RegisteredClaims.ExpiresAt.Time, time.Second)
-		require.WithinDuration(t, expectedClaims.RegisteredClaims.IssuedAt.Time, payload.RegisteredClaims.IssuedAt.Time, time.Second)
+		require.Equal(t, expectedClaims.Subject, payload.Subject)
+		require.NotNil(t, payload.ExpiresAt)
+		require.NotNil(t, payload.IssuedAt)
+		require.WithinDuration(t, expectedClaims.ExpiresAt.Time, payload.ExpiresAt.Time, time.Second)
+		require.WithinDuration(t, expectedClaims.IssuedAt.Time, payload.IssuedAt.Time, time.Second)
 	})
 }
 

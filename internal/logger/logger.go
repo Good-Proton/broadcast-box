@@ -14,24 +14,36 @@ var (
 	once     sync.Once
 )
 
+func getLogger() *zap.Logger {
+	if instance == nil {
+		_ = Initialize()
+	}
+
+	if instance == nil {
+		return zap.NewNop()
+	}
+
+	return instance
+}
+
 func Debug(message string, fields ...zap.Field) {
-	instance.Debug(message, fields...)
+	getLogger().Debug(message, fields...)
 }
 
 func Info(message string, fields ...zap.Field) {
-	instance.Info(message, fields...)
+	getLogger().Info(message, fields...)
 }
 
 func Warn(message string, fields ...zap.Field) {
-	instance.Warn(message, fields...)
+	getLogger().Warn(message, fields...)
 }
 
 func Error(message string, fields ...zap.Field) {
-	instance.Error(message, fields...)
+	getLogger().Error(message, fields...)
 }
 
 func Fatal(message string, fields ...zap.Field) {
-	instance.Fatal(message, fields...)
+	getLogger().Fatal(message, fields...)
 }
 
 func Sync() error {
@@ -65,7 +77,9 @@ func Initialize() error {
 			)
 		}
 
-		Info("Initialized logger", zap.String("setLevel", logLevel.String()))
+		if err == nil && instance != nil {
+			instance.Info("Initialized logger", zap.String("setLevel", logLevel.String()))
+		}
 	})
 	return err
 }

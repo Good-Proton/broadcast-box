@@ -7,7 +7,6 @@ toolchain go1.24.0
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
-	github.com/joho/godotenv v1.5.1
 	github.com/pion/dtls/v3 v3.0.6
 	github.com/pion/ice/v3 v3.0.16
 	github.com/pion/interceptor v0.1.40
