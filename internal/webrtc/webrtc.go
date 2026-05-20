@@ -295,9 +295,16 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 		cfg, err := config.GetAppConfig()
 		var publicIP string
 		if err == nil {
+			logger.Info("Using public IP from config",
+				zap.String("publicIp", cfg.PublicIp),
+			)
 			publicIP = cfg.PublicIp
+		} else {
+			logger.Warn("Failed to get public IP from config", zap.Error(err))
 		}
+
 		if publicIP == "" {
+			logger.Info("Getting public IP from external service")
 			publicIP = getPublicIP()
 		}
 
