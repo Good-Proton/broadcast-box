@@ -299,11 +299,12 @@ func main() {
 		}
 	}
 
-	webrtc.Configure()
 	_, err := config.LoadConfig()
 	if err != nil {
 		logger.Fatal("Failed to load app config", zap.Error(err))
 	}
+
+	webrtc.Configure()
 
 	if os.Getenv("NETWORK_TEST_ON_START") == "true" {
 		logger.Info(networkTestIntroMessage)
