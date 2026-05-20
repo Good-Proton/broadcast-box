@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/glimesh/broadcast-box/internal/auth"
+	"github.com/glimesh/broadcast-box/internal/config"
 	"github.com/glimesh/broadcast-box/internal/logger"
 	"github.com/pion/dtls/v3/pkg/crypto/elliptic"
 	"github.com/pion/ice/v3"
@@ -287,7 +288,16 @@ func createSettingEngine(isWHIP bool, udpMuxCache map[int]*ice.MultiUDPMuxDefaul
 	}
 
 	if os.Getenv("INCLUDE_PUBLIC_IP_IN_NAT_1_TO_1_IP") != "" {
-		NAT1To1IPs = append(NAT1To1IPs, getPublicIP())
+		cfg, err := config.GetAppConfig()
+		var publicIP string
+		if err == nil {
+			publicIP = cfg.PublicIp
+		}
+		if publicIP == "" {
+			publicIP = getPublicIP()
+		}
+
+		NAT1To1IPs = append(NAT1To1IPs, publicIP)
 	}
 
 	if os.Getenv("NAT_1_TO_1_IP") != "" {
