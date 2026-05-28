@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const publisherKeyframeRequestMinInterval = 500 * time.Millisecond
+
 func audioWriter(remoteTrack *webrtc.TrackRemote, stream *stream) {
 	rtpBuf := make([]byte, 1500)
 	for {
@@ -127,23 +129,6 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		}
 	}()
 
-	go func() {
-		for {
-			select {
-			case <-stream.whipActiveContext.Done():
-				return
-			case <-stream.pliChan:
-				if sendErr := peerConnection.WriteRTCP([]rtcp.Packet{
-					&rtcp.PictureLossIndication{
-						MediaSSRC: uint32(remoteTrack.SSRC()),
-					},
-				}); sendErr != nil {
-					return
-				}
-			}
-		}
-	}()
-
 	rtpBuf := make([]byte, 1500)
 	rtpPkt := &rtp.Packet{}
 	codec := getVideoTrackCodec(remoteTrack.Codec().MimeType)
@@ -233,13 +218,70 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		lastTimestamp = rtpPkt.Timestamp
 		lastSequenceNumber = rtpPkt.SequenceNumber
 
+		payload := append([]byte(nil), rtpPkt.Payload...)
+		packet := *rtpPkt
+		packet.Payload = payload
+
 		s.whepSessionsLock.RLock()
 		for i := range s.whepSessions {
-			s.whepSessions[i].sendVideoPacket(rtpPkt, id, timeDiff, sequenceDiff, codec, isKeyframe)
+			packetCopy := packet
+			s.whepSessions[i].enqueueVideoPacket(videoPacket{
+				packet:       packetCopy,
+				layer:        id,
+				timeDiff:     timeDiff,
+				sequenceDiff: sequenceDiff,
+				codec:        codec,
+				isKeyframe:   isKeyframe,
+			})
 		}
 		s.whepSessionsLock.RUnlock()
 
 	}
+}
+
+func requestPublisherKeyframe(stream *stream, layer, reason, whepSessionId string) {
+	now := time.Now()
+
+	streamMapLock.Lock()
+	peerConnection := stream.publisherConnection
+	packets := make([]rtcp.Packet, 0, len(stream.videoTracks))
+	for _, videoTrack := range stream.videoTracks {
+		if layer != "" && videoTrack.rid != layer {
+			continue
+		}
+
+		lastRequest := time.Unix(0, videoTrack.lastKeyframeRequest.Load())
+		if now.Sub(lastRequest) < publisherKeyframeRequestMinInterval {
+			continue
+		}
+		videoTrack.lastKeyframeRequest.Store(now.UnixNano())
+
+		packets = append(packets, &rtcp.PictureLossIndication{
+			MediaSSRC: videoTrack.ssrc,
+		})
+	}
+	streamMapLock.Unlock()
+
+	if peerConnection == nil || len(packets) == 0 {
+		return
+	}
+
+	if err := peerConnection.WriteRTCP(packets); err != nil {
+		logger.Debug("Failed to request publisher keyframe",
+			zap.Error(err),
+			zap.String("layer", layer),
+			zap.String("reason", reason),
+			zap.String("whepSessionId", whepSessionId),
+		)
+		return
+	}
+
+	logger.Debug("Requested publisher keyframe",
+		zap.Int("requests", len(packets)),
+		zap.String("layer", layer),
+		zap.String("reason", reason),
+		zap.String("whepSessionId", whepSessionId),
+	)
 }
 
 func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
@@ -254,6 +296,10 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 
 	peerConnection, err := newPeerConnection(apiWhip)
 	if err != nil {
+		logger.Error("Failed to create peer connection",
+			zap.Error(err),
+			zap.String("streamKey", streamInfo.StreamKey),
+		)
 		return "", err
 	}
 
@@ -261,6 +307,12 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 	defer streamMapLock.Unlock()
 	stream, err := getStream(streamInfo, whipSessionId)
 	if err != nil {
+		logger.Error("Failed to get stream for WHIP session",
+			zap.Error(err),
+			zap.String("streamKey", streamInfo.StreamKey),
+			zap.String("lhUserId", streamInfo.LhUserId),
+			zap.String("whipSessionId", whipSessionId),
+		)
 		return "", err
 	}
 
@@ -304,6 +356,11 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 	for whepSessionId := range stream.subscriberConnections {
 		for label := range stream.subscriberDataChannels[whepSessionId] {
 			if err := ensureDataChannelPair(label, stream, nil, &whepSessionId); err != nil {
+				logger.Error("Failed to ensure data channel pair",
+					zap.Error(err),
+					zap.String("label", label),
+					zap.String("whepSessionId", whepSessionId),
+				)
 				return "", err
 			}
 		}
@@ -317,6 +374,7 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 			logger.Error("Failed to ensure data channel pair",
 				zap.Error(err),
 				zap.String("label", label),
+				zap.String("whepSessionId", whipSessionId),
 			)
 		}
 		stream.dataChannelsLock.Unlock()
@@ -326,6 +384,10 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 		SDP:  string(offer),
 		Type: webrtc.SDPTypeOffer,
 	}); err != nil {
+		logger.Error("Failed to set remote description",
+			zap.Error(err),
+			zap.String("streamKey", streamInfo.StreamKey),
+		)
 		return "", err
 	}
 
@@ -333,8 +395,16 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 	answer, err := peerConnection.CreateAnswer(nil)
 
 	if err != nil {
+		logger.Error("Failed to create answer",
+			zap.Error(err),
+			zap.String("streamKey", streamInfo.StreamKey),
+		)
 		return "", err
 	} else if err = peerConnection.SetLocalDescription(answer); err != nil {
+		logger.Error("Failed to set local description",
+			zap.Error(err),
+			zap.String("streamKey", streamInfo.StreamKey),
+		)
 		return "", err
 	}
 
