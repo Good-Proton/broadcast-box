@@ -115,3 +115,165 @@ func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 		return true, ""
 	})
 }
+
+func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
+	app := startBroadcastBox(t)
+
+	publisher := startPublisher(t, app.baseURL+"/api/whip", testStreamKey+"-streamer-stop")
+	t.Cleanup(publisher.close)
+
+	viewer := startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-streamer-stop", "viewer-streamer-stop")
+	t.Cleanup(viewer.close)
+
+	eventually(t, 20*time.Second, 100*time.Millisecond, func() (bool, string) {
+		if viewer.videoPackets.Load() < 20 || viewer.videoFrames.Load() < 5 {
+			return false, fmt.Sprintf("%s video packets=%d frames=%d", viewer.name, viewer.videoPackets.Load(), viewer.videoFrames.Load())
+		}
+
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+		status := findStatus(statuses, testStreamKey+"-streamer-stop")
+		if status == nil {
+			return false, "stream not present in status"
+		}
+		if status.WHIPICEConnectionState != "connected" {
+			return false, fmt.Sprintf("WHIP ICE state=%q", status.WHIPICEConnectionState)
+		}
+
+		return true, ""
+	})
+
+	publisher.close()
+
+	eventually(t, 20*time.Second, 200*time.Millisecond, func() (bool, string) {
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+
+		status := findStatus(statuses, testStreamKey+"-streamer-stop")
+		if status == nil {
+			return false, "stream unexpectedly removed while viewer is still connected"
+		}
+		if status.WHIPICEConnectionState == "connected" {
+			return false, "WHIP ICE state still connected"
+		}
+		return true, ""
+	})
+
+	eventuallyCounterStable(t, 10*time.Second, 200*time.Millisecond, 5, func() uint64 {
+		return viewer.videoPackets.Load()
+	})
+
+	viewer.close()
+
+	eventually(t, 20*time.Second, 200*time.Millisecond, func() (bool, string) {
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+		if status := findStatus(statuses, testStreamKey+"-streamer-stop"); status != nil {
+			return false, "stream still present after streamer and viewer are closed"
+		}
+		return true, ""
+	})
+}
+
+func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
+	app := startBroadcastBox(t)
+
+	publisher := startPublisher(t, app.baseURL+"/api/whip", testStreamKey+"-viewers-stop")
+	t.Cleanup(publisher.close)
+
+	viewers := []*viewer{
+		startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-viewers-stop", "viewer-a"),
+		startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-viewers-stop", "viewer-b"),
+	}
+	for _, viewer := range viewers {
+		t.Cleanup(viewer.close)
+	}
+
+	eventually(t, 20*time.Second, 100*time.Millisecond, func() (bool, string) {
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+
+		status := findStatus(statuses, testStreamKey+"-viewers-stop")
+		if status == nil {
+			return false, "stream not present in status"
+		}
+		if len(status.WHEPSessions) != len(viewers) {
+			return false, fmt.Sprintf("whepSessions=%d", len(status.WHEPSessions))
+		}
+		for _, viewer := range viewers {
+			if viewer.videoPackets.Load() < 20 || viewer.videoFrames.Load() < 5 {
+				return false, fmt.Sprintf("%s video packets=%d frames=%d", viewer.name, viewer.videoPackets.Load(), viewer.videoFrames.Load())
+			}
+		}
+
+		return true, ""
+	})
+
+	for _, viewer := range viewers {
+		viewer.close()
+	}
+
+	eventually(t, 20*time.Second, 200*time.Millisecond, func() (bool, string) {
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+
+		status := findStatus(statuses, testStreamKey+"-viewers-stop")
+		if status == nil {
+			return false, "stream unexpectedly removed while streamer is still active"
+		}
+		if status.WHIPICEConnectionState != "connected" {
+			return false, fmt.Sprintf("WHIP ICE state=%q", status.WHIPICEConnectionState)
+		}
+		if len(status.WHEPSessions) != 0 {
+			return false, fmt.Sprintf("whepSessions still active=%d", len(status.WHEPSessions))
+		}
+		return true, ""
+	})
+
+	deleteWHIP(t, app.baseURL+"/api/whip", testStreamKey+"-viewers-stop")
+	publisher.close()
+
+	eventually(t, 5*time.Second, 100*time.Millisecond, func() (bool, string) {
+		statuses, err := fetchStatuses(app.baseURL)
+		if err != nil {
+			return false, err.Error()
+		}
+		if status := findStatus(statuses, testStreamKey+"-viewers-stop"); status != nil {
+			return false, "stream still present after WHIP delete"
+		}
+		return true, ""
+	})
+}
+
+func eventuallyCounterStable(t *testing.T, timeout time.Duration, interval time.Duration, consecutiveEqualReads int, read func() uint64) {
+	t.Helper()
+
+	last := read()
+	equalReads := 0
+
+	eventually(t, timeout, interval, func() (bool, string) {
+		current := read()
+		if current == last {
+			equalReads++
+		} else {
+			last = current
+			equalReads = 0
+		}
+
+		if equalReads >= consecutiveEqualReads {
+			return true, ""
+		}
+
+		return false, fmt.Sprintf("counter still changing: current=%d stableReads=%d/%d", current, equalReads, consecutiveEqualReads)
+	})
+}
