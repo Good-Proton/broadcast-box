@@ -357,22 +357,29 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 		}
 	})
 
-	stream.dataChannelsLock.Lock()
-	stream.publisherConnection = peerConnection
+	if err := func() error {
+		stream.dataChannelsLock.Lock()
+		defer stream.dataChannelsLock.Unlock()
 
-	for whepSessionId := range stream.subscriberConnections {
-		for label := range stream.subscriberDataChannels[whepSessionId] {
-			if err := ensureDataChannelPair(label, stream, nil, &whepSessionId); err != nil {
-				logger.Error("Failed to ensure data channel pair",
-					zap.Error(err),
-					zap.String("label", label),
-					zap.String("whepSessionId", whepSessionId),
-				)
-				return "", err
+		stream.publisherConnection = peerConnection
+
+		for whepSessionId := range stream.subscriberConnections {
+			for label := range stream.subscriberDataChannels[whepSessionId] {
+				if err := ensureDataChannelPair(label, stream, nil, &whepSessionId); err != nil {
+					logger.Error("Failed to ensure data channel pair",
+						zap.Error(err),
+						zap.String("label", label),
+						zap.String("whepSessionId", whepSessionId),
+					)
+					return err
+				}
 			}
 		}
+
+		return nil
+	}(); err != nil {
+		return "", err
 	}
-	stream.dataChannelsLock.Unlock()
 
 	peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
 		stream.dataChannelsLock.Lock()

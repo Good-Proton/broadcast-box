@@ -31,6 +31,46 @@ func doesPublisherConnectionExist() bool {
 	return ok && stream.publisherConnection != nil
 }
 
+func TestWHIPReleasesDataChannelsLockWhenEnsureDataChannelPairFails(t *testing.T) {
+	Configure()
+
+	streamInfo := &auth.StreamInfo{
+		StreamKey: "whip-data-channel-lock-leak",
+		LhUserId:  "",
+	}
+	whepSessionId := "stale-whep-session"
+	label := "chat"
+
+	staleSubscriber, err := newPeerConnection(apiWhep)
+	require.NoError(t, err)
+	require.NoError(t, staleSubscriber.Close())
+
+	streamMapLock.Lock()
+	testStream, err := getStream(streamInfo, "")
+	require.NoError(t, err)
+	testStream.subscriberConnections[whepSessionId] = staleSubscriber
+	testStream.subscriberDataChannels[whepSessionId] = map[string]*webrtc.DataChannel{
+		label: nil,
+	}
+	streamMapLock.Unlock()
+
+	_, err = WHIP("unused offer", streamInfo)
+	require.Error(t, err)
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		testStream.dataChannelsLock.Lock()
+		defer testStream.dataChannelsLock.Unlock()
+		close(lockAcquired)
+	}()
+
+	select {
+	case <-lockAcquired:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("dataChannelsLock remained locked after WHIP returned an error")
+	}
+}
+
 // Asserts that a old PeerConnection doesn't destroy the new one
 // when it disconnects
 func TestReconnect(t *testing.T) {
