@@ -42,6 +42,7 @@ type (
 		hasWHIPClient atomic.Bool
 		sessionId     string
 		lhUserId      string
+		streamKey     string
 
 		firstSeenEpoch uint64
 
@@ -49,8 +50,6 @@ type (
 
 		audioTrack           *webrtc.TrackLocalStaticRTP
 		audioPacketsReceived atomic.Uint64
-
-		pliChan chan any
 
 		whipActiveContext       context.Context
 		whipActiveContextCancel func()
@@ -72,20 +71,21 @@ type (
 	}
 
 	videoTrack struct {
-		sessionId         string
-		rid               string
-		codec             string
-		ssrc              uint32
-		packetsReceived   atomic.Uint64
-		bytesReceived     atomic.Uint64
-		framesReceived    atomic.Uint64
-		keyframesReceived atomic.Uint64
-		lastKeyFrameSeen  atomic.Value
-		firstPacketTime   atomic.Value
-		lastPacketTime    atomic.Value
-		startTime         uint64
-		width             atomic.Uint32
-		height            atomic.Uint32
+		sessionId           string
+		rid                 string
+		codec               string
+		ssrc                uint32
+		packetsReceived     atomic.Uint64
+		bytesReceived       atomic.Uint64
+		framesReceived      atomic.Uint64
+		keyframesReceived   atomic.Uint64
+		lastKeyFrameSeen    atomic.Value
+		lastKeyframeRequest atomic.Int64
+		firstPacketTime     atomic.Value
+		lastPacketTime      atomic.Value
+		startTime           uint64
+		width               atomic.Uint32
+		height              atomic.Uint32
 
 		rtt              atomic.Uint64
 		jitter           atomic.Uint64
@@ -143,7 +143,6 @@ func getStream(streamInfo *auth.StreamInfo, whipSessionId string) (*stream, erro
 
 		foundStream = &stream{
 			audioTrack:              audioTrack,
-			pliChan:                 make(chan any, 50),
 			whepSessions:            map[string]*whepSession{},
 			whipActiveContext:       whipActiveContext,
 			whipActiveContextCancel: whipActiveContextCancel,
@@ -152,6 +151,7 @@ func getStream(streamInfo *auth.StreamInfo, whipSessionId string) (*stream, erro
 			publisherDataChannels:   make(map[string]*webrtc.DataChannel),
 			subscriberConnections:   make(map[string]*webrtc.PeerConnection),
 			lhUserId:                streamInfo.LhUserId,
+			streamKey:               streamInfo.StreamKey,
 		}
 		foundStream.whipICEConnectionState.Store("new")
 		streamMap[streamInfo.StreamKey] = foundStream
@@ -179,16 +179,16 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 	defer stream.whepSessionsLock.Unlock()
 
 	if !forWHIP {
+		if session, ok := stream.whepSessions[sessionId]; ok {
+			session.close()
+		}
+
 		stream.dataChannelsLock.Lock()
 		delete(stream.subscriberConnections, sessionId)
 		stream.dataChannelsLock.Unlock()
 
 		delete(stream.whepSessions, sessionId)
 	} else {
-		stream.dataChannelsLock.Lock()
-		stream.publisherConnection = nil
-		stream.dataChannelsLock.Unlock()
-
 		stream.videoTracks = slices.DeleteFunc(stream.videoTracks, func(v *videoTrack) bool {
 			return v.sessionId == sessionId
 		})
@@ -199,6 +199,10 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 		if stream.sessionId != sessionId {
 			return
 		}
+
+		stream.dataChannelsLock.Lock()
+		stream.publisherConnection = nil
+		stream.dataChannelsLock.Unlock()
 		stream.hasWHIPClient.Store(false)
 	}
 
@@ -586,6 +590,7 @@ type whepSessionStatus struct {
 	FramesWritten             uint64    `json:"framesWritten"`
 	KeyframesWritten          uint64    `json:"keyframesWritten"`
 	PacketsDropped            uint64    `json:"packetsDropped"`
+	PacketsQueueDropped       uint64    `json:"packetsQueueDropped"`
 	PacketsSkippedForKeyframe uint64    `json:"packetsSkippedForKeyframe"`
 	LayerSwitches             uint64    `json:"layerSwitches"`
 	SessionStartEpoch         uint64    `json:"sessionStartEpoch"`
@@ -633,13 +638,14 @@ func GetStreamStatuses() []StreamStatus {
 			whepSessions = append(whepSessions, whepSessionStatus{
 				ID:                        id,
 				CurrentLayer:              currentLayer,
-				SequenceNumber:            whepSession.sequenceNumber,
-				Timestamp:                 whepSession.timestamp,
-				PacketsWritten:            whepSession.packetsWritten,
+				SequenceNumber:            uint16(whepSession.sequenceNumber.Load()),
+				Timestamp:                 whepSession.timestamp.Load(),
+				PacketsWritten:            whepSession.packetsWritten.Load(),
 				BytesWritten:              whepSession.bytesWritten.Load(),
 				FramesWritten:             whepSession.framesWritten.Load(),
 				KeyframesWritten:          whepSession.keyframesWritten.Load(),
 				PacketsDropped:            whepSession.packetsDropped.Load(),
+				PacketsQueueDropped:       whepSession.packetsQueueDropped.Load(),
 				PacketsSkippedForKeyframe: whepSession.packetsSkippedForKeyframe.Load(),
 				LayerSwitches:             whepSession.layerSwitches.Load(),
 				SessionStartEpoch:         whepSession.sessionStartEpoch,
@@ -713,7 +719,10 @@ func GetStreamStatuses() []StreamStatus {
 			})
 		}
 
+		stream.dataChannelsLock.RLock()
 		dataChannelCount := len(stream.publisherDataChannels)
+		stream.dataChannelsLock.RUnlock()
+
 		whipICEState, _ := stream.whipICEConnectionState.Load().(string)
 
 		out = append(out, StreamStatus{

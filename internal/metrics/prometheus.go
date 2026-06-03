@@ -210,7 +210,15 @@ var (
 	whepSessionPacketsDropped = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "broadcast_box_whep_session_packets_dropped_total",
-			Help: "Total number of packets dropped for the WHEP session",
+			Help: "Total number of packets dropped while writing to the WHEP session",
+		},
+		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
+	)
+
+	whepSessionPacketsQueueDropped = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "broadcast_box_whep_session_packets_queue_dropped_total",
+			Help: "Total number of packets dropped because the WHEP session packet queue was full",
 		},
 		[]string{"stream_key", "lh_user_id", "session_id", "current_layer"},
 	)
@@ -333,6 +341,7 @@ func UpdateMetrics() {
 	whepSessionFramesWritten.Reset()
 	whepSessionKeyframesWritten.Reset()
 	whepSessionPacketsDropped.Reset()
+	whepSessionPacketsQueueDropped.Reset()
 	whepSessionPacketsSkippedForKeyframe.Reset()
 	whepSessionLayerSwitches.Reset()
 	whepSessionStartEpoch.Reset()
@@ -383,6 +392,7 @@ func UpdateMetrics() {
 			whepSessionFramesWritten.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.FramesWritten))
 			whepSessionKeyframesWritten.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.KeyframesWritten))
 			whepSessionPacketsDropped.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.PacketsDropped))
+			whepSessionPacketsQueueDropped.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.PacketsQueueDropped))
 			whepSessionPacketsSkippedForKeyframe.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.PacketsSkippedForKeyframe))
 			whepSessionLayerSwitches.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.LayerSwitches))
 			whepSessionStartEpoch.WithLabelValues(status.StreamKey, status.LhUserId, session.ID, session.CurrentLayer).Set(float64(session.SessionStartEpoch))

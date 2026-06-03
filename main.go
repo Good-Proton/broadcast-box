@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +29,7 @@ const (
 	networkTestIntroMessage   = "\033[0;33mNETWORK_TEST_ON_START is enabled. If the test fails Broadcast Box will exit.\nSee the README for how to debug or disable NETWORK_TEST_ON_START\033[0m"
 	networkTestSuccessMessage = "\033[0;32mNetwork Test passed.\nHave fun using Broadcast Box.\033[0m"
 	networkTestFailedMessage  = "\033[0;31mNetwork Test failed.\n%s\nPlease see the README and join Discord for help\033[0m"
+	httpListenerFDEnv         = "BROADCAST_BOX_HTTP_LISTENER_FD"
 )
 
 var (
@@ -54,6 +57,29 @@ func logHTTPError(w http.ResponseWriter, r *http.Request, err error, code int) {
 		zap.String("url", r.URL.String()),
 	)
 	http.Error(w, err.Error(), code)
+}
+
+func listenHTTP(address string) (net.Listener, error) {
+	if fdValue := os.Getenv(httpListenerFDEnv); fdValue != "" {
+		fd, err := strconv.ParseUint(fdValue, 10, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", httpListenerFDEnv, err)
+		}
+
+		file := os.NewFile(uintptr(fd), "broadcast-box-http-listener")
+		if file == nil {
+			return nil, fmt.Errorf("create file for %s=%s", httpListenerFDEnv, fdValue)
+		}
+		defer file.Close() // nolint:errcheck
+
+		listener, err := net.FileListener(file)
+		if err != nil {
+			return nil, fmt.Errorf("create listener from %s: %w", httpListenerFDEnv, err)
+		}
+		return listener, nil
+	}
+
+	return net.Listen("tcp", address)
 }
 
 func whipHandler(res http.ResponseWriter, req *http.Request) {
@@ -355,15 +381,30 @@ func main() {
 	mux.HandleFunc("/api/healthcheck", corsHandler(healthCheckHandler))
 	mux.HandleFunc("/api/metrics", metricsHandler)
 
-	server := &http.Server{
-		Handler: mux,
-		Addr:    os.Getenv("HTTP_ADDRESS"),
-	}
-
 	tlsKey := os.Getenv("SSL_KEY")
 	tlsCert := os.Getenv("SSL_CERT")
+	tlsEnabled := tlsKey != "" && tlsCert != ""
 
-	if tlsKey != "" && tlsCert != "" {
+	listenAddr := os.Getenv("HTTP_ADDRESS")
+	if listenAddr == "" {
+		if tlsEnabled {
+			listenAddr = ":https"
+		} else {
+			listenAddr = ":http"
+		}
+	}
+
+	listener, err := listenHTTP(listenAddr)
+	if err != nil {
+		logger.Fatal("Failed to listen on HTTP address", zap.Error(err), zap.String("address", listenAddr))
+	}
+
+	server := &http.Server{
+		Handler: mux,
+		Addr:    listenAddr,
+	}
+
+	if tlsEnabled {
 		server.TLSConfig = &tls.Config{
 			Certificates: []tls.Certificate{},
 		}
@@ -375,10 +416,10 @@ func main() {
 
 		server.TLSConfig.Certificates = append(server.TLSConfig.Certificates, cert)
 
-		logger.Info("Starting HTTPS server", zap.String("address", os.Getenv("HTTP_ADDRESS")))
-		logger.Fatal("HTTPS server failed", zap.Error(server.ListenAndServeTLS("", "")))
+		logger.Info("Starting HTTPS server", zap.String("address", listener.Addr().String()))
+		logger.Fatal("HTTPS server failed", zap.Error(server.ServeTLS(listener, "", "")))
 	} else {
-		logger.Info("Starting HTTP server", zap.String("address", os.Getenv("HTTP_ADDRESS")))
-		logger.Fatal("HTTP server failed", zap.Error(server.ListenAndServe()))
+		logger.Info("Starting HTTP server", zap.String("address", listener.Addr().String()))
+		logger.Fatal("HTTP server failed", zap.Error(server.Serve(listener)))
 	}
 }
