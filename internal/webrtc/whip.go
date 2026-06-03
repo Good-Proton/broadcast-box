@@ -218,21 +218,23 @@ func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection
 		lastTimestamp = rtpPkt.Timestamp
 		lastSequenceNumber = rtpPkt.SequenceNumber
 
-		payload := append([]byte(nil), rtpPkt.Payload...)
-		packet := *rtpPkt
-		packet.Payload = payload
-
 		s.whepSessionsLock.RLock()
-		for i := range s.whepSessions {
-			packetCopy := packet
-			s.whepSessions[i].enqueueVideoPacket(videoPacket{
-				packet:       packetCopy,
-				layer:        id,
-				timeDiff:     timeDiff,
-				sequenceDiff: sequenceDiff,
-				codec:        codec,
-				isKeyframe:   isKeyframe,
-			})
+		if len(s.whepSessions) != 0 {
+			payload := append([]byte(nil), rtpPkt.Payload...)
+			packet := *rtpPkt
+			packet.Payload = payload
+
+			for i := range s.whepSessions {
+				packetCopy := packet
+				s.whepSessions[i].enqueueVideoPacket(videoPacket{
+					packet:       packetCopy,
+					layer:        id,
+					timeDiff:     timeDiff,
+					sequenceDiff: sequenceDiff,
+					codec:        codec,
+					isKeyframe:   isKeyframe,
+				})
+			}
 		}
 		s.whepSessionsLock.RUnlock()
 
@@ -244,6 +246,11 @@ func requestPublisherKeyframe(stream *stream, layer, reason, whepSessionId strin
 
 	streamMapLock.Lock()
 	peerConnection := stream.publisherConnection
+	if peerConnection == nil {
+		streamMapLock.Unlock()
+		return
+	}
+
 	packets := make([]rtcp.Packet, 0, len(stream.videoTracks))
 	for _, videoTrack := range stream.videoTracks {
 		if layer != "" && videoTrack.rid != layer {
@@ -262,7 +269,7 @@ func requestPublisherKeyframe(stream *stream, layer, reason, whepSessionId strin
 	}
 	streamMapLock.Unlock()
 
-	if peerConnection == nil || len(packets) == 0 {
+	if len(packets) == 0 {
 		return
 	}
 
@@ -374,7 +381,7 @@ func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
 			logger.Error("Failed to ensure data channel pair",
 				zap.Error(err),
 				zap.String("label", label),
-				zap.String("whepSessionId", whipSessionId),
+				zap.String("whipSessionId", whipSessionId),
 			)
 		}
 		stream.dataChannelsLock.Unlock()

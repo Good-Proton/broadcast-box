@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+const httpListenerFDEnv = "BROADCAST_BOX_HTTP_LISTENER_FD"
+
 type broadcastBoxProcess struct {
 	baseURL string
 	cancel  context.CancelFunc
@@ -41,12 +43,13 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 		t.Fatalf("build broadcast-box: %v\n%s", err, string(out))
 	}
 
-	httpPort := freeTCPPort(t)
-	udpMuxPort := freeUDPPort(t)
+	httpListener, httpListenerFile := listenTCP(t)
+	httpAddress := httpListener.Addr().String()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binaryPath)
 	cmd.Dir = repoRoot
+	cmd.ExtraFiles = []*os.File{httpListenerFile}
 
 	logs := &lockedBuffer{}
 	cmd.Stdout = logs
@@ -55,7 +58,8 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 		"APP_ENV=development",
 		"DISABLE_FRONTEND=true",
 		"DISABLE_STATUS=false",
-		"HTTP_ADDRESS=127.0.0.1:" + fmt.Sprint(httpPort),
+		httpListenerFDEnv + "=3",
+		"HTTP_ADDRESS=" + httpAddress,
 		"INCLUDE_LOOPBACK_CANDIDATE=true",
 		"NETWORK_TYPES=udp4",
 		"NETWORK_TEST_ON_START=false",
@@ -70,16 +74,19 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 		"STUN_SERVERS=",
 		"NAT_1_TO_1_IP=",
 		"INCLUDE_PUBLIC_IP_IN_NAT_1_TO_1_IP=",
-		"UDP_MUX_PORT=" + fmt.Sprint(udpMuxPort),
 	}
 
 	if err := cmd.Start(); err != nil {
+		_ = httpListenerFile.Close()
+		_ = httpListener.Close()
 		cancel()
 		t.Fatalf("start broadcast-box: %v", err)
 	}
+	_ = httpListenerFile.Close()
+	_ = httpListener.Close()
 
 	app := &broadcastBoxProcess{
-		baseURL: "http://127.0.0.1:" + fmt.Sprint(httpPort),
+		baseURL: "http://" + httpAddress,
 		cancel:  cancel,
 		done:    make(chan struct{}),
 		logs:    logs,
@@ -164,28 +171,21 @@ func repositoryRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-func freeTCPPort(t *testing.T) int {
+func listenTCP(t *testing.T) (*net.TCPListener, *os.File) {
 	t.Helper()
 
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
-		t.Fatalf("allocate TCP port: %v", err)
+		t.Fatalf("listen on TCP port: %v", err)
 	}
-	defer listener.Close() // nolint:errcheck
 
-	return listener.Addr().(*net.TCPAddr).Port
-}
-
-func freeUDPPort(t *testing.T) int {
-	t.Helper()
-
-	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	file, err := listener.File()
 	if err != nil {
-		t.Fatalf("allocate UDP port: %v", err)
+		_ = listener.Close()
+		t.Fatalf("create TCP listener file: %v", err)
 	}
-	defer conn.Close() // nolint:errcheck
 
-	return conn.LocalAddr().(*net.UDPAddr).Port
+	return listener, file
 }
 
 type lockedBuffer struct {
