@@ -719,7 +719,10 @@ func GetStreamStatuses() []StreamStatus {
 			})
 		}
 
+		stream.dataChannelsLock.RLock()
 		dataChannelCount := len(stream.publisherDataChannels)
+		stream.dataChannelsLock.RUnlock()
+
 		whipICEState, _ := stream.whipICEConnectionState.Load().(string)
 
 		out = append(out, StreamStatus{
