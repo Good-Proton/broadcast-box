@@ -23,6 +23,14 @@ func doesWHIPSessionExist() (ok bool) {
 	return
 }
 
+func doesPublisherConnectionExist() bool {
+	streamMapLock.Lock()
+	defer streamMapLock.Unlock()
+
+	stream, ok := streamMap[testStreamInfo.StreamKey]
+	return ok && stream.publisherConnection != nil
+}
+
 // Asserts that a old PeerConnection doesn't destroy the new one
 // when it disconnects
 func TestReconnect(t *testing.T) {
@@ -98,6 +106,7 @@ func TestReconnect(t *testing.T) {
 	require.NoError(t, firstPublisher.Close())
 	time.Sleep(time.Second)
 	require.True(t, doesWHIPSessionExist())
+	require.True(t, doesPublisherConnectionExist())
 
 	// Close the second WHIP Session, the session must be gone
 	require.NoError(t, secondPublisher.Close())

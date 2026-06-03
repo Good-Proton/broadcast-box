@@ -189,10 +189,6 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 
 		delete(stream.whepSessions, sessionId)
 	} else {
-		stream.dataChannelsLock.Lock()
-		stream.publisherConnection = nil
-		stream.dataChannelsLock.Unlock()
-
 		stream.videoTracks = slices.DeleteFunc(stream.videoTracks, func(v *videoTrack) bool {
 			return v.sessionId == sessionId
 		})
@@ -203,6 +199,10 @@ func peerConnectionDisconnected(forWHIP bool, streamKey string, sessionId string
 		if stream.sessionId != sessionId {
 			return
 		}
+
+		stream.dataChannelsLock.Lock()
+		stream.publisherConnection = nil
+		stream.dataChannelsLock.Unlock()
 		stream.hasWHIPClient.Store(false)
 	}
 
