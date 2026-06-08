@@ -22,6 +22,7 @@ func (w *WHEPSession) SendAudioPacket(packet codecs.TrackPacket) {
 	}
 
 	w.AudioPacketsWritten += 1
+	w.AudioBytesWritten.Add(uint64(len(packet.Packet.Payload)))
 	w.AudioTimestamp = uint32(int64(w.AudioTimestamp) + packet.TimeDiff)
 	audioTrack := w.AudioTrack
 	w.AudioLock.Unlock()
@@ -44,6 +45,7 @@ func (w *WHEPSession) SendVideoPacket(packet codecs.TrackPacket) {
 
 	if w.IsWaitingForKeyframe.Load() {
 		if !packet.IsKeyframe {
+			w.VideoPacketsSkippedForKeyframe.Add(1)
 			w.SendPLI()
 			return
 		}
@@ -54,6 +56,12 @@ func (w *WHEPSession) SendVideoPacket(packet codecs.TrackPacket) {
 	w.VideoLock.Lock()
 	w.VideoBytesWritten += len(packet.Packet.Payload)
 	w.VideoPacketsWritten += 1
+	if packet.Packet.Marker {
+		w.VideoFramesWritten.Add(1)
+	}
+	if packet.IsKeyframe {
+		w.VideoKeyframesWritten.Add(1)
+	}
 	w.VideoSequenceNumber = uint16(w.VideoSequenceNumber) + uint16(packet.SequenceDiff)
 	w.VideoTimestamp = uint32(int64(w.VideoTimestamp) + packet.TimeDiff)
 	w.updateVideoBitrateLocked(time.Now())

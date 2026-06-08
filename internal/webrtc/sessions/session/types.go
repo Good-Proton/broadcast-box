@@ -34,6 +34,9 @@ type Session struct {
 
 	ChatManager *chat.Manager
 
-	DataChannelPeersLock sync.RWMutex
-	DataChannelPeers     map[string]*datadc.Peer
+	DataChannelPeersLock        sync.RWMutex
+	DataChannelPeers            map[string]*datadc.Peer
+	DataChannelMessagesReceived atomic.Uint64
+	DataChannelBytesReceived    atomic.Uint64
+	DataChannelBytesSent        atomic.Uint64
 }

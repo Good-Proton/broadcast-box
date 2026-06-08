@@ -103,8 +103,16 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 
 		s.StatusLock.RUnlock()
 
+		s.DataChannelPeersLock.RLock()
+		streamSession.DataChannelCount = len(s.DataChannelPeers)
+		s.DataChannelPeersLock.RUnlock()
+		streamSession.DataChannelMessagesReceived = s.DataChannelMessagesReceived.Load()
+		streamSession.DataChannelBytesReceived = s.DataChannelBytesReceived.Load()
+		streamSession.DataChannelBytesSent = s.DataChannelBytesSent.Load()
+
 		host := s.Host.Load()
 		if host != nil {
+			streamSession.WHIPConnectionEstablishedTime = host.ConnectionEstablishedEpoch.Load()
 			host.TracksLock.RLock()
 
 			for _, audioTrack := range host.AudioTracks {
@@ -114,6 +122,7 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 						Rid:             audioTrack.Rid,
 						PacketsReceived: audioTrack.PacketsReceived.Load(),
 						PacketsDropped:  audioTrack.PacketsDropped.Load(),
+						BytesReceived:   audioTrack.BytesReceived.Load(),
 					})
 			}
 
@@ -126,11 +135,14 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 				streamSession.VideoTracks = append(
 					streamSession.VideoTracks,
 					session.VideoTrackState{
-						Rid:             videoTrack.Rid,
-						Bitrate:         videoTrack.Bitrate.Load(),
-						PacketsReceived: videoTrack.PacketsReceived.Load(),
-						PacketsDropped:  videoTrack.PacketsDropped.Load(),
-						LastKeyframe:    lastKeyFrame,
+						Rid:               videoTrack.Rid,
+						Bitrate:           videoTrack.Bitrate.Load(),
+						PacketsReceived:   videoTrack.PacketsReceived.Load(),
+						PacketsDropped:    videoTrack.PacketsDropped.Load(),
+						BytesReceived:     videoTrack.BytesReceived.Load(),
+						FramesReceived:    videoTrack.FramesReceived.Load(),
+						KeyframesReceived: videoTrack.KeyframesReceived.Load(),
+						LastKeyframe:      lastKeyFrame,
 					})
 			}
 

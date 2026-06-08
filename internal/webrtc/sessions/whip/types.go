@@ -23,27 +23,32 @@ type (
 		AudioTracks map[string]*AudioTrack
 
 		// TODO: WHEPSessionsSnapshot should contain serializable state, not runtime references.
-		WHEPSessionsSnapshot atomic.Value
+		WHEPSessionsSnapshot       atomic.Value
+		ConnectionEstablishedEpoch atomic.Int64
 
 		ChatManager *chat.Manager
 	}
 
 	VideoTrack struct {
-		Rid             string
-		Priority        int
-		Bitrate         atomic.Uint64
-		PacketsReceived atomic.Uint64
-		PacketsDropped  atomic.Uint64
-		LastReceived    atomic.Value
-		LastKeyFrame    atomic.Value
-		MediaSSRC       atomic.Uint32
-		Track           *codecs.TrackMultiCodec
+		Rid               string
+		Priority          int
+		Bitrate           atomic.Uint64
+		PacketsReceived   atomic.Uint64
+		PacketsDropped    atomic.Uint64
+		BytesReceived     atomic.Uint64
+		FramesReceived    atomic.Uint64
+		KeyframesReceived atomic.Uint64
+		LastReceived      atomic.Value
+		LastKeyFrame      atomic.Value
+		MediaSSRC         atomic.Uint32
+		Track             *codecs.TrackMultiCodec
 	}
 	AudioTrack struct {
 		Rid             string
 		Priority        int
 		PacketsReceived atomic.Uint64
 		PacketsDropped  atomic.Uint64
+		BytesReceived   atomic.Uint64
 		LastReceived    atomic.Value
 		Track           *codecs.TrackMultiCodec
 	}

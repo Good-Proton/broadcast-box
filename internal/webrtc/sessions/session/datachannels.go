@@ -37,6 +37,9 @@ func (s *Session) BroadcastDataChannelFrom(sender *datadc.Peer, payload []byte, 
 		return
 	}
 
+	s.DataChannelMessagesReceived.Add(1)
+	s.DataChannelBytesReceived.Add(uint64(len(payload)))
+
 	s.DataChannelPeersLock.RLock()
 	if s.DataChannelPeers[sender.ID()] != sender {
 		s.DataChannelPeersLock.RUnlock()
@@ -60,6 +63,8 @@ func (s *Session) BroadcastDataChannelFrom(sender *datadc.Peer, payload []byte, 
 				"recipientPeerID", recipient.ID(),
 				"err", err,
 			)
+		} else {
+			s.DataChannelBytesSent.Add(uint64(len(payload)))
 		}
 	}
 }

@@ -2,6 +2,7 @@ package whep
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/glimesh/broadcast-box/internal/webrtc/chatdc"
 	"github.com/glimesh/broadcast-box/internal/webrtc/datadc"
@@ -26,6 +27,7 @@ func onWHEPICEConnectionStateChangeHandler(w *WHEPSession) func(webrtc.ICEConnec
 		switch state {
 		case
 			webrtc.ICEConnectionStateConnected:
+			w.ConnectionEstablishedEpoch.Store(time.Now().Unix())
 			w.SendPLI()
 		case
 			webrtc.ICEConnectionStateFailed,

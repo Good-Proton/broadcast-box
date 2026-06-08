@@ -45,6 +45,8 @@ func (w *WHIPSession) audioWriter(remoteTrack *webrtc.TrackRemote, streamKey str
 		}
 
 		track.PacketsReceived.Add(1)
+		track.BytesReceived.Add(uint64(rtpRead))
+		track.LastReceived.Store(time.Now())
 
 		err = rtpPkt.Unmarshal(rtpBuf[:rtpRead])
 		if err != nil {
@@ -140,14 +142,20 @@ func (w *WHIPSession) videoWriter(remoteTrack *webrtc.TrackRemote, streamKey str
 		rtpPkt.Extensions = nil
 
 		track.PacketsReceived.Add(1)
+		track.BytesReceived.Add(uint64(rtpRead))
 		bitrateWindowBytes += uint64(rtpRead)
 
 		isKeyframe := isPacketKeyframe(rtpPkt, codec, depacketizer)
 		if isKeyframe {
+			track.KeyframesReceived.Add(1)
 			track.LastKeyFrame.Store(time.Now())
+		}
+		if rtpPkt.Marker {
+			track.FramesReceived.Add(1)
 		}
 
 		now := time.Now()
+		track.LastReceived.Store(now)
 		if elapsed := now.Sub(bitrateWindowStart); elapsed >= time.Second {
 			track.Bitrate.Store(uint64(float64(bitrateWindowBytes) / elapsed.Seconds()))
 			bitrateWindowStart = now

@@ -86,19 +86,31 @@ func (w *WHEPSession) GetWHEPSessionStatus() (state SessionState) {
 	currentVideoLayer := w.VideoLayerCurrent.Load().(string)
 
 	state = SessionState{
-		ID: w.SessionID,
+		ID:                        w.SessionID,
+		ConnectionEstablishedTime: w.ConnectionEstablishedEpoch.Load(),
 
 		AudioLayerCurrent:   currentAudioLayer,
 		AudioTimestamp:      w.AudioTimestamp,
 		AudioPacketsWritten: w.AudioPacketsWritten,
+		AudioBytesWritten:   w.AudioBytesWritten.Load(),
 		AudioSequenceNumber: uint64(w.AudioSequenceNumber),
 
-		VideoLayerCurrent:   currentVideoLayer,
-		VideoTimestamp:      w.VideoTimestamp,
-		VideoBitrate:        w.VideoBitrate.Load(),
-		VideoPacketsWritten: w.VideoPacketsWritten,
-		VideoPacketsDropped: w.VideoPacketsDropped.Load(),
-		VideoSequenceNumber: uint64(w.VideoSequenceNumber),
+		VideoLayerCurrent:              currentVideoLayer,
+		VideoTimestamp:                 w.VideoTimestamp,
+		VideoBitrate:                   w.VideoBitrate.Load(),
+		VideoPacketsWritten:            w.VideoPacketsWritten,
+		VideoPacketsDropped:            w.VideoPacketsDropped.Load(),
+		VideoBytesWritten:              uint64(w.VideoBytesWritten),
+		VideoFramesWritten:             w.VideoFramesWritten.Load(),
+		VideoKeyframesWritten:          w.VideoKeyframesWritten.Load(),
+		VideoPacketsSkippedForKeyframe: w.VideoPacketsSkippedForKeyframe.Load(),
+		VideoLayerSwitches:             w.VideoLayerSwitches.Load(),
+		VideoSequenceNumber:            uint64(w.VideoSequenceNumber),
+		VideoRTT:                       w.VideoRTT.Load(),
+		VideoJitter:                    w.VideoJitter.Load(),
+		VideoDelay:                     w.VideoDelay.Load(),
+		VideoTotalLost:                 w.VideoTotalLost.Load(),
+		VideoLastSenderReport:          w.VideoLastSenderReport.Load(),
 	}
 
 	w.VideoLock.Unlock()
@@ -120,7 +132,11 @@ func (w *WHEPSession) SetVideoLayer(encodingID string) {
 	slog.Debug("Setting Video Layer")
 
 	w.VideoLock.Lock()
+	currentLayer, _ := w.VideoLayerCurrent.Load().(string)
 	w.VideoLayerCurrent.Store(encodingID)
+	if currentLayer != encodingID {
+		w.VideoLayerSwitches.Add(1)
+	}
 	w.videoLayerPriority = 0
 	w.videoLayerExplicit = encodingID != ""
 	w.VideoLock.Unlock()

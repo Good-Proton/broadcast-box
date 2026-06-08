@@ -3,6 +3,7 @@ package whip
 import (
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/glimesh/broadcast-box/internal/webrtc/chatdc"
 	"github.com/glimesh/broadcast-box/internal/webrtc/datadc"
@@ -67,6 +68,7 @@ func (w *WHIPSession) onConnectionStateChange() func(webrtc.PeerConnectionState)
 
 		case webrtc.PeerConnectionStateConnected:
 			slog.Info("WHIPSession.PeerConnection.OnConnectionStateChange: Host connected", "id", w.ID)
+			w.ConnectionEstablishedEpoch.Store(time.Now().Unix())
 
 		}
 	}
