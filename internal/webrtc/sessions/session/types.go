@@ -16,6 +16,7 @@ type Session struct {
 	// Protects StreamKey, MOTD, HasHost, IsPublic
 	StatusLock sync.RWMutex
 	StreamKey  string
+	LhUserId   string
 
 	MOTD        string
 	HasHost     atomic.Bool

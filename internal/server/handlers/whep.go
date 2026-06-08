@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/glimesh/broadcast-box/internal/environment"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
 	"github.com/glimesh/broadcast-box/internal/server/helpers"
 	"github.com/glimesh/broadcast-box/internal/server/webhook"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
@@ -53,21 +54,25 @@ func whepHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	token := helpers.ResolveBearerToken(request.Header.Get("Authorization"))
-	if token == "" {
+	authInfo, err := authorization.AuthenticateStreamRequest(request, webhook.WHEPConnect)
+	if err != nil {
 		helpers.LogHTTPError(responseWriter, "Authorization was invalid", http.StatusUnauthorized)
 		return
 	}
 
+	streamKey := authInfo.StreamKey
 	if webhookURL := os.Getenv(environment.WebhookURL); webhookURL != "" {
-		token, err = webhook.CallWebhook(webhookURL, webhook.WHEPConnect, token, request)
+		streamKey, err = webhook.CallWebhook(webhookURL, webhook.WHEPConnect, streamKey, request)
 		if err != nil {
 			responseWriter.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 	}
 
-	whipAnswer, sessionID, err := webrtc.WHEP(string(offer), token)
+	whipAnswer, sessionID, err := webrtc.WHEP(string(offer), authorization.PublicProfile{
+		StreamKey: streamKey,
+		LhUserId:  authInfo.LhUserId,
+	})
 	if err != nil {
 		slog.Error("API.WHEP: Setup Error", "err", err)
 		helpers.LogHTTPError(responseWriter, err.Error(), http.StatusBadRequest)

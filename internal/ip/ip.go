@@ -4,12 +4,23 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/glimesh/broadcast-box/internal/environment"
 )
 
+const defaultPublicIpApiUrl = "http://ip-api.com/json/"
+
 func GetPublicIP() string {
-	req, err := http.Get("http://ip-api.com/json/")
+	apiUrl := os.Getenv(environment.PublicIpApiUrl)
+	if apiUrl == "" {
+		apiUrl = defaultPublicIpApiUrl
+	}
+
+	req, err := http.Get(apiUrl)
 
 	if err != nil {
 		slog.Error("Failed to get Public IP", "err", err)
@@ -18,7 +29,7 @@ func GetPublicIP() string {
 
 	defer func() {
 		if closeErr := req.Body.Close(); closeErr != nil {
-			slog.Error("Failed to get Public IP", "err", err)
+			slog.Error("Failed to get Public IP", "err", closeErr)
 			os.Exit(1)
 		}
 	}()
@@ -34,6 +45,11 @@ func GetPublicIP() string {
 	}{}
 
 	if err = json.Unmarshal(body, &ip); err != nil {
+		plainIp := strings.TrimSpace(string(body))
+		if net.ParseIP(plainIp) != nil {
+			return plainIp
+		}
+
 		slog.Error("Failed to get Public IP", "err", err)
 		os.Exit(1)
 	}

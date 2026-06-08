@@ -36,6 +36,8 @@ func GetServeMuxHandler() http.HandlerFunc {
 	// Logging and status endpoints
 	serverMux.HandleFunc("/api/log", corsHandler(logHandler))
 	serverMux.HandleFunc("/api/status", corsHandler(statusHandler))
+	serverMux.HandleFunc("/api/healthcheck", corsHandler(healthcheckHandler))
+	serverMux.HandleFunc("/api/metrics", corsHandler(metricsHandler))
 
 	// Admin endpoints
 	serverMux.HandleFunc("/api/admin/login", corsHandler(adminHandlers.LoginHandler))

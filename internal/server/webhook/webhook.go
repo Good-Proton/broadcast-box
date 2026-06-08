@@ -6,31 +6,36 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/glimesh/broadcast-box/internal/environment"
+	"github.com/glimesh/broadcast-box/internal/ip"
 )
 
 const defaultTimeout = time.Second * 5
 
 type webhookPayload struct {
-	Action      action            `json:"action"`
-	IP          string            `json:"ip"`
-	BearerToken string            `json:"bearerToken"`
-	QueryParams map[string]string `json:"queryParams"`
-	UserAgent   string            `json:"userAgent"`
+	Action           Action            `json:"action"`
+	IP               string            `json:"ip"`
+	BearerToken      string            `json:"bearerToken"`
+	QueryParams      map[string]string `json:"queryParams"`
+	UserAgent        string            `json:"userAgent"`
+	AdvertiseAddress string            `json:"advertiseAddress,omitempty"`
 }
 
 type webhookResponse struct {
 	StreamKey string `json:"streamKey"`
 }
 
-type action string
+type Action string
 
 const (
-	WHIPConnect action = "whip-connect"
-	WHEPConnect action = "whep-connect"
+	WHIPConnect Action = "whip-connect"
+	WHEPConnect Action = "whep-connect"
 )
 
-func CallWebhook(url string, action action, bearerToken string, request *http.Request) (string, error) {
+func CallWebhook(url string, action Action, bearerToken string, request *http.Request) (string, error) {
 	start := time.Now()
 
 	queryParams := make(map[string]string)
@@ -41,11 +46,12 @@ func CallWebhook(url string, action action, bearerToken string, request *http.Re
 	}
 
 	jsonPayload, err := json.Marshal(webhookPayload{
-		Action:      action,
-		IP:          getIPAddress(request),
-		BearerToken: bearerToken,
-		QueryParams: queryParams,
-		UserAgent:   request.UserAgent(),
+		Action:           action,
+		IP:               getIPAddress(request),
+		BearerToken:      bearerToken,
+		QueryParams:      queryParams,
+		UserAgent:        request.UserAgent(),
+		AdvertiseAddress: getAdvertiseAddress(),
 	})
 
 	if err != nil {
@@ -84,6 +90,14 @@ func CallWebhook(url string, action action, bearerToken string, request *http.Re
 	}
 
 	return response.StreamKey, nil
+}
+
+func getAdvertiseAddress() string {
+	if os.Getenv(environment.PublicIpApiUrl) == "" && os.Getenv(environment.IncludePublicIPInNAT1To1IP) == "" {
+		return ""
+	}
+
+	return ip.GetPublicIP()
 }
 
 func getIPAddress(r *http.Request) string {

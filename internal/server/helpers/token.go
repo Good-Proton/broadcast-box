@@ -23,7 +23,7 @@ func ResolveBearerToken(authHeader string) (result string) {
 
 			// Invalid, handle as unicode
 		} else {
-			re := regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+			re := regexp.MustCompile(`^[A-Za-z0-9_\-.~]+$`)
 
 			auth = strings.TrimSpace(auth)
 			auth = strings.ReplaceAll(auth, " ", "_")

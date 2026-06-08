@@ -9,12 +9,36 @@ import (
 
 	"github.com/glimesh/broadcast-box/internal/environment"
 	"github.com/glimesh/broadcast-box/internal/server/authorization"
+	"github.com/glimesh/broadcast-box/internal/webrtc/sessions/manager"
 	"github.com/stretchr/testify/require"
 )
 
 type whipWebhookPayload struct {
 	Action      string `json:"action"`
 	BearerToken string `json:"bearerToken"`
+}
+
+func TestWHIPHandlerDeleteRequiresSessionID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodDelete, "/api/whip/", nil)
+	req.Header.Set("Authorization", "Bearer stream_key")
+
+	resp := httptest.NewRecorder()
+	WHIPHandler(resp, req)
+
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func TestWHIPHandlerDeleteUnknownSession(t *testing.T) {
+	manager.SessionsManager = &manager.SessionManager{}
+	manager.SessionsManager.Setup()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/whip/unknown-session", nil)
+	req.Header.Set("Authorization", "Bearer stream_key")
+
+	resp := httptest.NewRecorder()
+	WHIPHandler(resp, req)
+
+	require.Equal(t, http.StatusBadRequest, resp.Code)
 }
 
 func TestWHIPHandlerWebhookUsesResolvedStreamKey(t *testing.T) {

@@ -12,12 +12,8 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func WHEP(offer string, streamKey string) (string, string, error) {
+func WHEP(offer string, profile authorization.PublicProfile) (string, string, error) {
 	utils.DebugOutputOffer(offer)
-
-	profile := authorization.PublicProfile{
-		StreamKey: streamKey,
-	}
 
 	session, err := manager.SessionsManager.GetOrAddSession(profile, false)
 	if err != nil {
@@ -31,7 +27,7 @@ func WHEP(offer string, streamKey string) (string, string, error) {
 		return "", "", err
 	}
 
-	audioTrack, videoTrack := codecs.GetDefaultTracks(streamKey)
+	audioTrack, videoTrack := codecs.GetDefaultTracks(profile.StreamKey)
 
 	_, err = peerConnection.AddTrack(audioTrack)
 	if err != nil {
@@ -74,7 +70,7 @@ func WHEP(offer string, streamKey string) (string, string, error) {
 	}
 
 	<-gatherComplete
-	slog.Info("WHEPSession.GatheringCompletePromise: Completed Gathering", "streamKey", streamKey)
+	slog.Info("WHEPSession.GatheringCompletePromise: Completed Gathering", "streamKey", profile.StreamKey)
 
 	return utils.DebugOutputAnswer(utils.AppendCandidateToAnswer(peerConnection.LocalDescription().SDP)),
 		whepSessionID,

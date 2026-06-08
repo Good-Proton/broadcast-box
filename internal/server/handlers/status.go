@@ -12,6 +12,12 @@ import (
 )
 
 func statusHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	responseWriter.Header().Add("Content-Type", "application/json")
+	if !isStatusRequestAuthorized(request) {
+		helpers.LogHTTPError(responseWriter, "Status authorization was invalid", http.StatusUnauthorized)
+		return
+	}
+
 	streamKey := request.URL.Query().Get("key")
 
 	if streamKey == "" {
@@ -20,7 +26,6 @@ func statusHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		streamStatusHandler(responseWriter, request)
 	}
 
-	responseWriter.Header().Add("Content-Type", "application/json")
 }
 
 func streamStatusHandler(responseWriter http.ResponseWriter, request *http.Request) {
@@ -49,6 +54,15 @@ func streamStatusHandler(responseWriter http.ResponseWriter, request *http.Reque
 	}
 
 	responseWriter.Header().Add("Content-Type", "application/json")
+}
+
+func isStatusRequestAuthorized(request *http.Request) bool {
+	statusAuthToken := environment.SanitizeValue(os.Getenv(environment.StatusAuthToken))
+	if statusAuthToken == "" {
+		return true
+	}
+
+	return helpers.ResolveBearerToken(request.Header.Get("Authorization")) == statusAuthToken
 }
 
 func sessionStatusesHandler(responseWriter http.ResponseWriter, request *http.Request) {

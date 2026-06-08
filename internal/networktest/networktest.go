@@ -18,7 +18,8 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"github.com/glimesh/broadcast-box/internal/environment"
-	whipHandlers "github.com/glimesh/broadcast-box/internal/server/handlers/whip"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
+	internalwebrtc "github.com/glimesh/broadcast-box/internal/webrtc"
 	"github.com/glimesh/broadcast-box/internal/webrtc/codecs"
 )
 
@@ -32,13 +33,36 @@ func RunNetworkTest() {
 
 	fmt.Println(networkTestIntroMessage)
 
-	err := run(whipHandlers.WHIPHandler)
+	err := run(networkTestWHIPHandler)
 	if err != nil {
 		fmt.Printf(networkTestFailedMessage, err)
 		os.Exit(1)
 	}
 
 	fmt.Println(networkTestSuccessMessage)
+}
+
+func networkTestWHIPHandler(res http.ResponseWriter, req *http.Request) {
+	offer, err := io.ReadAll(req.Body)
+	if err != nil || string(offer) == "" {
+		http.Error(res, "error reading offer", http.StatusBadRequest)
+		return
+	}
+
+	answer, sessionID, err := internalwebrtc.WHIP(string(offer), authorization.PublicProfile{
+		StreamKey: "networktest",
+		IsPublic:  false,
+		MOTD:      "Network test",
+	})
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	res.Header().Add("Location", "/api/whip/"+sessionID)
+	res.Header().Add("Content-Type", "application/sdp")
+	res.WriteHeader(http.StatusCreated)
+	_, _ = fmt.Fprint(res, answer)
 }
 
 func run(whipHandler func(res http.ResponseWriter, req *http.Request)) error {

@@ -1,13 +1,15 @@
 package session
 
 import (
-	"github.com/glimesh/broadcast-box/internal/webrtc/sessions/whep"
 	"time"
+
+	"github.com/glimesh/broadcast-box/internal/webrtc/sessions/whep"
 )
 
 // Status for an individual streaming session
 type whipSessionStatus struct {
 	StreamKey   string    `json:"streamKey"`
+	LhUserId    string    `json:"lhUserId,omitempty"`
 	MOTD        string    `json:"motd"`
 	ViewerCount int       `json:"viewers"`
 	IsOnline    bool      `json:"isOnline"`

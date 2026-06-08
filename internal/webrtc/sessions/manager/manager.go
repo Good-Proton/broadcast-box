@@ -25,6 +25,7 @@ func (m *SessionManager) addSession(profile authorization.PublicProfile) (s *ses
 	s = &session.Session{
 
 		StreamKey:   profile.StreamKey,
+		LhUserId:    profile.LhUserId,
 		IsPublic:    profile.IsPublic,
 		MOTD:        profile.MOTD,
 		StreamStart: time.Now(),
@@ -91,6 +92,7 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 
 		streamSession := session.StreamSessionState{
 			StreamKey:   s.StreamKey,
+			LhUserId:    s.LhUserId,
 			StreamStart: s.StreamStart,
 			IsPublic:    s.IsPublic,
 			MOTD:        s.MOTD,

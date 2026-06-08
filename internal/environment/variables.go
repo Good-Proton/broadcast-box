@@ -19,6 +19,9 @@ const (
 	StreamProfilePath   = "STREAM_PROFILE_PATH"
 	StreamProfilePolicy = "STREAM_PROFILE_POLICY"
 	WebhookURL          = "WEBHOOK_URL"
+	JWTPublicKey        = "JWT_PUBLIC_KEY"
+	StatusAuthToken     = "STATUS_AUTH_TOKEN"
+	PublicIpApiUrl      = "PUBLIC_IP_API_URL"
 
 	// FRONTEND
 	FrontendDisabled   = "DISABLE_FRONTEND"

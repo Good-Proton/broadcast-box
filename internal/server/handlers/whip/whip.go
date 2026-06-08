@@ -30,9 +30,8 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	token := helpers.ResolveBearerToken(authHeader)
-	if token == "" {
-		slog.Info("Authorization was invalid")
+	authInfo, err := authorization.AuthenticateStreamRequest(request, webhook.WHIPConnect)
+	if err != nil {
 		helpers.LogHTTPError(responseWriter, "Authorization was invalid", http.StatusUnauthorized)
 		return
 	}
@@ -64,42 +63,54 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 
 	var userProfile authorization.PublicProfile
 
-	// Stream profile policy
-	switch os.Getenv(environment.StreamProfilePolicy) {
-	// Only approved profiles are allowed to stream
-	case authorization.StreamPolicyReservedOnly:
-		slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyReservedOnly)
-		profile, err := authorization.GetPublicProfile(token)
-		if err != nil {
-			slog.Info("Unauthorized login attempt", "token", token)
-			responseWriter.WriteHeader(http.StatusUnauthorized)
-			return
+	if authInfo.IsJwt {
+		userProfile = authorization.PublicProfile{
+			StreamKey: authInfo.StreamKey,
+			LhUserId:  authInfo.LhUserId,
+			IsPublic:  true,
+			MOTD:      "Welcome to " + authInfo.StreamKey + "'s stream!",
 		}
-		userProfile = *profile
+	} else {
+		token := authInfo.StreamKey
 
-	default:
-		slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyWithReserved)
-
-		// If using a streamKey check if it has been reserved
-		if authorization.IsProfileReserved(token) {
-			slog.Info("Unauthorized login attempt with reserved Streamkey", "token", token)
-			responseWriter.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-
-		// If its a bearer token, validate and use the profile
-		profile, _ := authorization.GetPublicProfile(token)
-		if profile != nil {
+		// Stream profile policy
+		switch os.Getenv(environment.StreamProfilePolicy) {
+		// Only approved profiles are allowed to stream
+		case authorization.StreamPolicyReservedOnly:
+			slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyReservedOnly)
+			profile, err := authorization.GetPublicProfile(token)
+			if err != nil {
+				slog.Info("Unauthorized login attempt", "token", token)
+				responseWriter.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			userProfile = *profile
+
+		default:
+			slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyWithReserved)
+
+			// If using a streamKey check if it has been reserved
+			if authorization.IsProfileReserved(token) {
+				slog.Info("Unauthorized login attempt with reserved Streamkey", "token", token)
+				responseWriter.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			// If its a bearer token, validate and use the profile
+			profile, _ := authorization.GetPublicProfile(token)
+			if profile != nil {
+				userProfile = *profile
+			}
 		}
 	}
 
 	// Set default profile in case none is set
 	if userProfile == (authorization.PublicProfile{}) {
 		userProfile = authorization.PublicProfile{
-			StreamKey: token,
+			StreamKey: authInfo.StreamKey,
+			LhUserId:  authInfo.LhUserId,
 			IsPublic:  true,
-			MOTD:      "Welcome to " + token + "'s stream!",
+			MOTD:      "Welcome to " + authInfo.StreamKey + "'s stream!",
 		}
 	}
 
@@ -113,6 +124,7 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 
 		userProfile = authorization.PublicProfile{
 			StreamKey: streamKey,
+			LhUserId:  authInfo.LhUserId,
 			IsPublic:  true,
 			MOTD:      "Welcome to " + streamKey + "'s stream!",
 		}
