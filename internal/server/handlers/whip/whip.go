@@ -40,8 +40,11 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		sessionID := getSessionIDFromWHIPPath(request.URL.Path)
 
 		if sessionID == "" {
-			slog.Info("API.WHIP.Delete Error: Missing session id")
-			helpers.LogHTTPError(responseWriter, "Missing session id", http.StatusBadRequest)
+			slog.Info("API.WHIP.Delete: Removing stream", "streamKey", authInfo.StreamKey)
+			if err := deleteByStreamKeyHandler(responseWriter, authInfo.StreamKey); err != nil {
+				slog.Error("API.WHIP.Delete Error", "err", err)
+				helpers.LogHTTPError(responseWriter, err.Error(), http.StatusBadRequest)
+			}
 			return
 		}
 
@@ -196,6 +199,16 @@ func deleteHandler(res http.ResponseWriter, sessionID string) error {
 	}
 
 	res.WriteHeader(http.StatusNoContent)
+
+	return nil
+}
+
+func deleteByStreamKeyHandler(res http.ResponseWriter, streamKey string) error {
+	if err := webrtc.HandleWHIPDeleteByStreamKey(streamKey); err != nil {
+		return err
+	}
+
+	res.WriteHeader(http.StatusOK)
 
 	return nil
 }

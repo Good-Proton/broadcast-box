@@ -101,6 +101,25 @@ func HandleWHIPDelete(sessionID string) error {
 	return nil
 }
 
+func HandleWHIPDeleteByStreamKey(streamKey string) error {
+	if manager.SessionsManager == nil {
+		return errors.New("no session found")
+	}
+
+	session, isFound := manager.SessionsManager.GetSessionByID(streamKey)
+
+	if !isFound {
+		return errors.New("no session found")
+	}
+
+	session.RemoveHost()
+	if session.GetStreamStatus().ViewerCount == 0 {
+		session.Close()
+	}
+
+	return nil
+}
+
 func patchPeerConnection(peerConnection *webrtc.PeerConnection, body string) error {
 	oldUfrag := getSdpKeyValue(peerConnection.CurrentRemoteDescription().SDP, "ice-ufrag")
 	oldPwd := getSdpKeyValue(peerConnection.CurrentRemoteDescription().SDP, "ice-pwd")
