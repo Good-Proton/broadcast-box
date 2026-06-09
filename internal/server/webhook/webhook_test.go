@@ -5,27 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/glimesh/broadcast-box/internal/config"
-	"github.com/glimesh/broadcast-box/internal/logger"
-	"go.uber.org/zap"
 )
-
-func TestMain(m *testing.M) {
-	logger.MustInitialize()
-	_, err := config.LoadConfig()
-	if err != nil {
-		logger.Fatal("Failed to load config: ", zap.Error(err))
-	}
-
-	code := m.Run()
-
-	_ = logger.Sync()
-	os.Exit(code)
-}
 
 func TestCallWebhook(t *testing.T) {
 	// Setup a Mock HTTP Server

@@ -10,7 +10,6 @@ import (
 	"github.com/glimesh/broadcast-box/internal/webrtc/utils"
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
-	"go.uber.org/zap"
 )
 
 func WHEP(offer string, profile authorization.PublicProfile) (string, string, error) {
@@ -18,10 +17,10 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 
 	session, err := manager.SessionsManager.GetOrAddSession(profile, false)
 	if err != nil {
-		logger.Error("Failed to get stream for WHEP",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-			zap.String("lhUserId", streamInfo.LhUserId),
+		slog.Error("Failed to get stream for WHEP",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
+			slog.String("lhUserId", profile.LhUserId),
 		)
 		return "", "", err
 	}
@@ -30,11 +29,11 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 
 	peerConnection, err := peerconnection.CreateWHEPPeerConnection()
 	if err != nil {
-		logger.Error("Failed to create peer connection",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-			zap.String("lhUserId", streamInfo.LhUserId),
-			zap.String("whepSessionId", whepSessionId),
+		slog.Error("Failed to create peer connection",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
+			slog.String("lhUserId", profile.LhUserId),
+			slog.String("whepSessionId", whepSessionID),
 		)
 		return "", "", err
 	}
@@ -48,9 +47,9 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 
 	videoRTCPSender, err := peerConnection.AddTrack(videoTrack)
 	if err != nil {
-		logger.Error("Failed to add video track",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
+		slog.Error("Failed to add video track",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
 		)
 		return "", "", err
 	}
@@ -59,9 +58,9 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 		SDP:  offer,
 		Type: webrtc.SDPTypeOffer,
 	}); err != nil {
-		logger.Error("Failed to set remote description",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
+		slog.Error("Failed to set remote description",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
 		)
 		return "", "", err
 	}
@@ -70,15 +69,15 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 	answer, err := peerConnection.CreateAnswer(nil)
 
 	if err != nil {
-		logger.Error("Failed to create answer",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
+		slog.Error("Failed to create answer",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
 		)
 		return "", "", err
 	} else if err = peerConnection.SetLocalDescription(answer); err != nil {
-		logger.Error("Failed to set local description",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
+		slog.Error("Failed to set local description",
+			slog.Any("err", err),
+			slog.String("streamKey", profile.StreamKey),
 		)
 		return "", "", err
 	}

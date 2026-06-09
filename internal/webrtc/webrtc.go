@@ -11,7 +11,6 @@ import (
 	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
-	"go.uber.org/zap"
 )
 
 func Setup(chatManager *chat.Manager) {

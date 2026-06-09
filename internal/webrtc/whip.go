@@ -49,35 +49,3 @@ func WHIP(offer string, profile authorization.PublicProfile) (sdp string, sessio
 	slog.Info("WHIP.Offer.Accepted", "streamKey", profile.StreamKey, "motd", profile.MOTD)
 	return
 }
-
-func WHIPDelete(streamInfo *auth.StreamInfo) error {
-	streamMapLock.Lock()
-	stream, ok := streamMap[streamInfo.StreamKey]
-	if !ok {
-		streamMapLock.Unlock()
-		return fmt.Errorf("stream not found: %s", streamInfo.StreamKey)
-	}
-
-	sessionId := stream.sessionId
-	publisherConnection := stream.publisherConnection
-	streamMapLock.Unlock()
-
-	if publisherConnection != nil {
-		if err := publisherConnection.Close(); err != nil {
-			logger.Error("Failed to close WHIP peer connection",
-				zap.Error(err),
-				zap.String("streamKey", streamInfo.StreamKey),
-			)
-			return err
-		}
-	}
-
-	logger.Info("Closing peer connection",
-		zap.String("side", "whip"),
-		zap.String("reason", "WHIP DELETE request"),
-		zap.String("streamKey", streamInfo.StreamKey),
-	)
-	peerConnectionDisconnected(true, streamInfo.StreamKey, sessionId)
-
-	return nil
-}
