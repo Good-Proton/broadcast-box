@@ -17,6 +17,7 @@ type (
 		IsWaitingForKeyframe       atomic.Bool
 		IsSessionClosed            atomic.Bool
 		ConnectionEstablishedEpoch atomic.Int64
+		ICEConnectionState         atomic.Value
 
 		SessionClose sync.Once
 		onClose      func(string)

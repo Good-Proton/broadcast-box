@@ -84,10 +84,12 @@ func (w *WHEPSession) GetWHEPSessionStatus() (state SessionState) {
 
 	currentAudioLayer := w.AudioLayerCurrent.Load().(string)
 	currentVideoLayer := w.VideoLayerCurrent.Load().(string)
+	iceConnectionState, _ := w.ICEConnectionState.Load().(string)
 
 	state = SessionState{
 		ID:                        w.SessionID,
 		ConnectionEstablishedTime: w.ConnectionEstablishedEpoch.Load(),
+		ICEConnectionState:        iceConnectionState,
 
 		AudioLayerCurrent:   currentAudioLayer,
 		AudioTimestamp:      w.AudioTimestamp,

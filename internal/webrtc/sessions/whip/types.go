@@ -25,6 +25,7 @@ type (
 		// TODO: WHEPSessionsSnapshot should contain serializable state, not runtime references.
 		WHEPSessionsSnapshot       atomic.Value
 		ConnectionEstablishedEpoch atomic.Int64
+		ICEConnectionState         atomic.Value
 
 		ChatManager *chat.Manager
 	}

@@ -24,6 +24,7 @@ type StreamSessionState struct {
 	MOTD                          string    `json:"motd"`
 	StreamStart                   time.Time `json:"streamStart"`
 	WHIPConnectionEstablishedTime int64     `json:"whipConnectionEstablishedTime,omitempty"`
+	WHIPICEConnectionState        string    `json:"whipICEConnectionState,omitempty"`
 	DataChannelCount              int       `json:"dataChannelCount"`
 	DataChannelMessagesReceived   uint64    `json:"dataChannelMessagesReceived"`
 	DataChannelBytesSent          uint64    `json:"dataChannelBytesSent"`

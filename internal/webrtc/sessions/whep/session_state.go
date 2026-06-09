@@ -3,6 +3,7 @@ package whep
 type SessionState struct {
 	ID                        string `json:"id"`
 	ConnectionEstablishedTime int64  `json:"connectionEstablishedTime,omitempty"`
+	ICEConnectionState        string `json:"iceConnectionState,omitempty"`
 
 	AudioLayerCurrent   string `json:"audioLayerCurrent"`
 	AudioTimestamp      uint32 `json:"audioTimestamp"`

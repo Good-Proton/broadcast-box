@@ -32,6 +32,8 @@ func (w *WHIPSession) registerWHIPHandlers(peerConnection *webrtc.PeerConnection
 
 func (w *WHIPSession) onICEConnectionStateChangeHandler() func(webrtc.ICEConnectionState) {
 	return func(state webrtc.ICEConnectionState) {
+		w.ICEConnectionState.Store(state.String())
+
 		if state == webrtc.ICEConnectionStateFailed || state == webrtc.ICEConnectionStateClosed {
 			slog.Info("WHIPSession.PeerConnection.OnICEConnectionStateChange", "id", w.ID)
 			w.notifyClosed()

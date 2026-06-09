@@ -23,6 +23,7 @@ func (w *WHEPSession) RegisterWHEPHandlers(peerConnection *webrtc.PeerConnection
 
 func onWHEPICEConnectionStateChangeHandler(w *WHEPSession) func(webrtc.ICEConnectionState) {
 	return func(state webrtc.ICEConnectionState) {
+		w.ICEConnectionState.Store(state.String())
 		slog.Info("WHEPSession.OnICEConnectionStateChange", "state", state)
 		switch state {
 		case

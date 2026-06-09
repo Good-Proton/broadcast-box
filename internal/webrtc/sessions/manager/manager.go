@@ -113,6 +113,7 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 		host := s.Host.Load()
 		if host != nil {
 			streamSession.WHIPConnectionEstablishedTime = host.ConnectionEstablishedEpoch.Load()
+			streamSession.WHIPICEConnectionState, _ = host.ICEConnectionState.Load().(string)
 			host.TracksLock.RLock()
 
 			for _, audioTrack := range host.AudioTracks {
@@ -138,8 +139,8 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 						Rid:               videoTrack.Rid,
 						Bitrate:           videoTrack.Bitrate.Load(),
 						PacketsReceived:   videoTrack.PacketsReceived.Load(),
-						PacketsDropped:    videoTrack.PacketsDropped.Load(),
-						BytesReceived:     videoTrack.BytesReceived.Load(),
+					PacketsDropped:    videoTrack.PacketsDropped.Load(),
+					BytesReceived:     videoTrack.BytesReceived.Load(),
 						FramesReceived:    videoTrack.FramesReceived.Load(),
 						KeyframesReceived: videoTrack.KeyframesReceived.Load(),
 						LastKeyframe:      lastKeyFrame,
