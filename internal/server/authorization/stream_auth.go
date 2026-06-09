@@ -44,7 +44,11 @@ func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*S
 
 		expectedAccessType := accessTypeForAction(action)
 		if expectedAccessType != "" && !strings.EqualFold(payload.AccessType, expectedAccessType) {
-			slog.Info("JWT access type invalid", "actual", payload.AccessType, "expected", expectedAccessType)
+			slog.Info(
+				"JWT access type invalid",
+				slog.String("actual", payload.AccessType),
+				slog.String("expected", expectedAccessType),
+			)
 			return nil, ErrInvalidStreamKey
 		}
 
@@ -55,7 +59,7 @@ func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*S
 	}
 
 	if !streamKeyRegex.MatchString(authInfo.StreamKey) {
-		slog.Info("Stream key format error", "streamKey", authInfo.StreamKey)
+		slog.Info("Stream key format error", slog.String("streamKey", authInfo.StreamKey))
 		return nil, ErrInvalidStreamKey
 	}
 

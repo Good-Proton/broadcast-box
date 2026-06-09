@@ -30,7 +30,7 @@ func VerifyJwtToken(tokenString string) (*JwtPayload, error) {
 
 	publicKey, err := jwt.ParseECPublicKeyFromPEM([]byte(publicKeyPem))
 	if err != nil {
-		slog.Error("JWT public key parse failed", "err", err)
+		slog.Error("JWT public key parse failed", slog.Any("err", err))
 		return nil, err
 	}
 
@@ -38,7 +38,7 @@ func VerifyJwtToken(tokenString string) (*JwtPayload, error) {
 		return publicKey, nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}))
 	if err != nil {
-		slog.Error("JWT parse failed", "err", err)
+		slog.Error("JWT parse failed", slog.Any("err", err))
 		return nil, err
 	}
 

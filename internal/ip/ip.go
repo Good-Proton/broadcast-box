@@ -29,7 +29,7 @@ func GetPublicIP() string {
 
 	defer func() {
 		if closeErr := req.Body.Close(); closeErr != nil {
-			slog.Error("Failed to get Public IP", "err", closeErr)
+			slog.Error("Failed to get Public IP", slog.Any("err", closeErr))
 			os.Exit(1)
 		}
 	}()

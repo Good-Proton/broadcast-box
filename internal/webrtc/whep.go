@@ -70,7 +70,7 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 	}
 
 	<-gatherComplete
-	slog.Info("WHEPSession.GatheringCompletePromise: Completed Gathering", "streamKey", profile.StreamKey)
+	slog.Info("WHEPSession.GatheringCompletePromise: Completed Gathering", slog.String("streamKey", profile.StreamKey))
 
 	return utils.DebugOutputAnswer(utils.AppendCandidateToAnswer(peerConnection.LocalDescription().SDP)),
 		whepSessionID,

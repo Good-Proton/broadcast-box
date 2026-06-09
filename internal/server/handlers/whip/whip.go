@@ -77,21 +77,21 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		switch os.Getenv(environment.StreamProfilePolicy) {
 		// Only approved profiles are allowed to stream
 		case authorization.StreamPolicyReservedOnly:
-			slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyReservedOnly)
+			slog.Info("Stream Policy Selected", slog.String("policy", authorization.StreamPolicyReservedOnly))
 			profile, err := authorization.GetPublicProfile(token)
 			if err != nil {
-				slog.Info("Unauthorized login attempt", "token", token)
+				slog.Info("Unauthorized login attempt", slog.String("token", token))
 				responseWriter.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			userProfile = *profile
 
 		default:
-			slog.Info("Stream Policy Selected", "policy", authorization.StreamPolicyWithReserved)
+			slog.Info("Stream Policy Selected", slog.String("policy", authorization.StreamPolicyWithReserved))
 
 			// If using a streamKey check if it has been reserved
 			if authorization.IsProfileReserved(token) {
-				slog.Info("Unauthorized login attempt with reserved Streamkey", "token", token)
+				slog.Info("Unauthorized login attempt with reserved Streamkey", slog.String("token", token))
 				responseWriter.WriteHeader(http.StatusUnauthorized)
 				return
 			}

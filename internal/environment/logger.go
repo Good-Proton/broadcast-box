@@ -19,6 +19,8 @@ var (
 	logMutex    sync.Mutex
 )
 
+const loggingModeJSON = "json"
+
 func SetupLogger() {
 	slog.SetLogLoggerLevel(parseLogLevel())
 
@@ -50,8 +52,22 @@ func setupLoggerForDate(date string) {
 		return
 	}
 
-	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	level := parseLogLevel()
+	slog.SetLogLoggerLevel(level)
+
+	output := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(output)
+	slog.SetDefault(slog.New(getSlogHandler(output, level)))
 	currentDate = date
+}
+
+func getSlogHandler(output io.Writer, level slog.Leveler) slog.Handler {
+	opts := &slog.HandlerOptions{Level: level}
+	if strings.EqualFold(os.Getenv(loggingMode), loggingModeJSON) {
+		return slog.NewJSONHandler(output, opts)
+	}
+
+	return slog.NewTextHandler(output, opts)
 }
 
 func startLogRotation() {

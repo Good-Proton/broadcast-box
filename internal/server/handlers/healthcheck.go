@@ -11,6 +11,6 @@ func healthcheckHandler(responseWriter http.ResponseWriter, _ *http.Request) {
 	responseWriter.WriteHeader(http.StatusOK)
 
 	if err := json.NewEncoder(responseWriter).Encode(map[string]string{"status": "ok"}); err != nil {
-		slog.Error("Healthcheck response encode failed", "err", err)
+		slog.Error("Healthcheck response encode failed", slog.Any("err", err))
 	}
 }

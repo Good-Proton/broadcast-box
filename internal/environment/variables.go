@@ -60,6 +60,7 @@ const (
 	// LOGGING
 	loggingEnabled          = "LOGGING_ENABLED"
 	loggingLevel            = "LOGGING_LEVEL"
+	loggingMode             = "LOGGING_MODE"
 	loggingDirectory        = "LOGGING_DIRECTORY"
 	loggingSingleFile       = "LOGGING_SINGLEFILE"
 	loggingNewFileOnStartup = "LOGGING_NEW_FILE_ON_STARTUP"
