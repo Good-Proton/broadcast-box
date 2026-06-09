@@ -13,25 +13,29 @@ import (
 
 type streamStatus struct {
 	StreamKey              string              `json:"streamKey"`
-	AudioPacketsReceived   uint64              `json:"audioPacketsReceived"`
-	VideoStreams           []videoStreamStatus `json:"videoStreams"`
-	WHEPSessions           []whepSessionStatus `json:"whepSessions"`
+	AudioTracks            []audioTrackStatus  `json:"audioTracks"`
+	VideoTracks            []videoTrackStatus  `json:"videoTracks"`
+	Sessions               []whepSessionStatus `json:"sessions"`
 	WHIPICEConnectionState string              `json:"whipICEConnectionState"`
 }
 
-type videoStreamStatus struct {
+type audioTrackStatus struct {
+	PacketsReceived uint64 `json:"packetsReceived"`
+}
+
+type videoTrackStatus struct {
 	PacketsReceived   uint64 `json:"packetsReceived"`
 	FramesReceived    uint64 `json:"framesReceived"`
 	KeyframesReceived uint64 `json:"keyframesReceived"`
 }
 
 type whepSessionStatus struct {
-	ID                  string `json:"id"`
-	PacketsWritten      uint64 `json:"packetsWritten"`
-	FramesWritten       uint64 `json:"framesWritten"`
-	KeyframesWritten    uint64 `json:"keyframesWritten"`
-	PacketsQueueDropped uint64 `json:"packetsQueueDropped"`
-	ICEConnectionState  string `json:"iceConnectionState"`
+	ID                    string `json:"id"`
+	VideoPacketsWritten   uint64 `json:"videoPacketsWritten"`
+	VideoFramesWritten    uint64 `json:"videoFramesWritten"`
+	VideoKeyframesWritten uint64 `json:"videoKeyframesWritten"`
+	VideoPacketsDropped   uint64 `json:"videoPacketsDropped"`
+	ICEConnectionState    string `json:"iceConnectionState"`
 }
 
 func fetchStatuses(baseURL string) ([]streamStatus, error) {

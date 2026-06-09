@@ -1,300 +1,412 @@
-﻿import React, {useEffect, useRef, useState} from 'react'
-import {parseLinkHeader} from '@web3-storage/parse-link-header'
-import {ArrowsPointingOutIcon, Square2StackIcon} from "@heroicons/react/16/solid";
-import VolumeComponent from "./components/VolumeComponent";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 import PlayPauseComponent from "./components/PlayPauseComponent";
-import QualitySelectorComponent from "./components/QualitySelectorComponent";
+import VideoLayerSelectorComponent from "./components/VideoLayerSelectorComponent";
+import AudioLayerSelectorComponent from "./components/AudioLayerSelectorComponent";
 import CurrentViewersComponent from "./components/CurrentViewersComponent";
+import { StreamStatus } from '../../providers/StatusProvider';
+import { CurrentLayersMessage, PeerConnectionSetup, SetupPeerConnectionProps } from './functions/peerconnection';
+import { ChatAdapter } from '../../hooks/useChatSession';
+import type { ReactionAdapter, ReactionStatus } from './functions/reactionDataChannel';
+import { ArrowsPointingOutIcon, Square2StackIcon, HeartIcon, XMarkIcon } from '@heroicons/react/20/solid';
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
+import VolumeComponent from './components/VolumeComponent';
+import { StatusMessageComponent } from './components/StatusMessageComponent';
 
 interface PlayerProps {
 	streamKey: string;
 	cinemaMode: boolean;
-	onCloseStream?: () => void;
+	fillContainer?: boolean;
+	isChatOpen?: boolean;
+	localReactionEventId?: number;
+	reactionAdapter?: ReactionAdapter;
+	onToggleChat?(): void;
+	onChatAdapterChange?(streamKey: string, adapter: ChatAdapter | undefined): void;
+	onReactionAdapterChange?(streamKey: string, adapter: ReactionAdapter | undefined): void;
+	onReactionStatusChange?(streamKey: string, status: ReactionStatus | undefined): void;
+	onStreamStatusChange?(streamKey: string, status: StreamStatus): void;
+	onCloseStream?(): void;
+}
+
+interface FullscreenElement extends HTMLElement {
+	webkitRequestFullscreen?: () => void | Promise<void>;
+	msRequestFullscreen?: () => void | Promise<void>;
+	webkitEnterFullscreen?: () => void;
 }
 
 const Player = (props: PlayerProps) => {
-	const apiPath = import.meta.env.VITE_API_PATH;
-	const {streamKey, cinemaMode} = props;
+	const {
+		cinemaMode,
+		fillContainer = false,
+		isChatOpen,
+		localReactionEventId = 0,
+		reactionAdapter,
+		onToggleChat,
+		onChatAdapterChange,
+		onReactionAdapterChange,
+		onReactionStatusChange,
+		onStreamStatusChange,
+		onCloseStream,
+	} = props
+	const streamKey = decodeURIComponent(props.streamKey).replace(/ /g, '_')
 
-	const [videoLayers, setVideoLayers] = useState([]);
-	const [hasSignal, setHasSignal] = useState<boolean>(false);
-	const [hasPacketLoss, setHasPacketLoss] = useState<boolean>(false)
+	const [currentStreamStatus, setCurrentStreamStatus] = useState<StreamStatus>({
+		streamKey: streamKey,
+		motd: "",
+		viewers: 0,
+		isOnline: false,
+	})
+
+	const [currentLayersStatus, setCurrentLayersStatus] = useState<CurrentLayersMessage | undefined>()
+	const [audioLayers, setAudioLayers] = useState<string[]>([]);
+	const [videoLayers, setVideoLayers] = useState<string[]>([]);
+	const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null)
+	const [layerEndpoint, setLayerEndpoint] = useState<string>('')
+	const [streamState, setStreamState] = useState<"Loading" | "Playing" | "Offline" | "Error">("Loading");
 	const [videoOverlayVisible, setVideoOverlayVisible] = useState<boolean>(false)
-	const [connectFailed, setConnectFailed] = useState<boolean>(false)
+	const [isVideoMuted, setIsVideoMuted] = useState<boolean>(true)
+	const [videoVolume, setVideoVolume] = useState<number>(50)
+	const [reactionAnimations, setReactionAnimations] = useState<{ id: number; x: number }[]>([])
 
+	const clickDelay = 250;
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const layerEndpointRef = useRef<string>('');
-	const hasSignalRef = useRef<boolean>(false);
-	const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
 	const videoOverlayVisibleTimeoutRef = useRef<number | undefined>(undefined);
-	const clickDelay = 250;
+	const reactionAnimationIdRef = useRef(0);
 	const lastClickTimeRef = useRef(0);
 	const clickTimeoutRef = useRef<number | undefined>(undefined);
 	const streamVideoPlayerId = streamKey + "_videoPlayer";
+	const setVideoRef = useCallback((element: HTMLVideoElement | null) => {
+		videoRef.current = element
+		setVideoElement(element)
+	}, [])
 
-	const setHasSignalHandler = (_: Event) => {
-		setHasSignal(() => true);
-	}
-	const resetTimer = (isVisible: boolean) => {
-		setVideoOverlayVisible(() => isVisible);
-		
-		if(videoOverlayVisibleTimeoutRef){
+	const peerConnectionConfig = useMemo<SetupPeerConnectionProps>(() => ({
+		streamKey: streamKey,
+		videoRef: videoRef,
+		layerEndpointRef: layerEndpointRef,
+		onStateChange: (state) => console.log("PeerConnection.onStateChange", state),
+		onStreamRestart: () => console.log("PeerConnection.onStreamRestart: Missing setup"),
+		onAudioLayerChange: (layers) => setAudioLayers(layers),
+		onVideoLayerChange: (layers) => setVideoLayers(layers),
+		onLayerEndpointChange: (endpoint) => setLayerEndpoint(endpoint),
+		onLayerStatus: (status) => setCurrentLayersStatus(status),
+		onStreamStatus: (status) => {
+			setCurrentStreamStatus(status)
+			onStreamStatusChange?.(streamKey, status)
+
+			if (!status.isOnline) {
+				setStreamState("Offline")
+				return
+			}
+
+			const videoElement = videoRef.current
+			if (videoElement !== null && !videoElement.paused && videoElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+				setStreamState("Playing")
+				return
+			}
+
+			setStreamState("Loading")
+		},
+		onError: () => setStreamState("Error"),
+		onChatAdapterChange: (adapter) => onChatAdapterChange?.(streamKey, adapter),
+		onReactionAdapterChange: (adapter) => onReactionAdapterChange?.(streamKey, adapter),
+	}), [onChatAdapterChange, onReactionAdapterChange, onStreamStatusChange, streamKey])
+
+	const addReactionAnimation = useCallback(() => {
+		const id = reactionAnimationIdRef.current + 1;
+		reactionAnimationIdRef.current = id;
+		const x = Math.round((Math.random() - 0.5) * 32);
+
+		setReactionAnimations((current) => [...current.slice(-7), { id, x }]);
+	}, []);
+
+	const handleEnterFullscreen = () => {
+		const videoElement = videoRef.current as FullscreenElement | null;
+		if (!videoElement) {
+			return;
+		}
+
+		try {
+			if (videoElement.requestFullscreen) {
+				void videoElement.requestFullscreen().catch((err) => {
+					console.error("VideoPlayer_RequestFullscreen", err);
+				});
+			} else if (videoElement.webkitRequestFullscreen) {
+				void videoElement.webkitRequestFullscreen();
+			} else if (videoElement.msRequestFullscreen) {
+				void videoElement.msRequestFullscreen();
+			} else if (videoElement.webkitEnterFullscreen) {
+				videoElement.webkitEnterFullscreen();
+			}
+		} catch (err) {
+			console.error("VideoPlayer_RequestFullscreen", err)
+		}
+	};
+
+
+	const resetTimer = useCallback((isVisible: boolean) => {
+		setVideoOverlayVisible(isVisible);
+
+		if (videoOverlayVisibleTimeoutRef) {
 			clearTimeout(videoOverlayVisibleTimeoutRef.current)
 		}
-		
+
 		videoOverlayVisibleTimeoutRef.current = setTimeout(() => {
-			setVideoOverlayVisible(() => false)
+			setVideoOverlayVisible(false)
 		}, 2500)
-	}
+	}, [])
 
 	const handleVideoPlayerClick = () => {
 		lastClickTimeRef.current = Date.now();
 
-		clickTimeoutRef.current = setTimeout(() => {
-			const timeSinceLastClick = Date.now() - lastClickTimeRef.current;
-			if (timeSinceLastClick >= clickDelay && (timeSinceLastClick - clickDelay) < 5000) {
-				videoRef.current?.paused
-					? videoRef.current?.play()
-					: videoRef.current?.pause();
-			}
-		}, clickDelay);
+			clickTimeoutRef.current = setTimeout(() => {
+				const timeSinceLastClick = Date.now() - lastClickTimeRef.current;
+				if (timeSinceLastClick >= clickDelay && (timeSinceLastClick - clickDelay) < 5000) {
+					if (videoRef.current?.paused) {
+						void videoRef.current.play()
+					} else {
+						videoRef.current?.pause()
+					}
+				}
+			}, clickDelay);
 	};
+
 	const handleVideoPlayerDoubleClick = () => {
 		clearTimeout(clickTimeoutRef.current);
 		lastClickTimeRef.current = 0;
-		videoRef.current?.requestFullscreen()
-			.catch(err => console.error("VideoPlayer_RequestFullscreen", err));
+		handleEnterFullscreen();
 	};
-	
+
+	const stopOverlayClickPropagation = (event: MouseEvent<HTMLElement>) => {
+		event.preventDefault();
+		event.stopPropagation();
+	};
+
 	useEffect(() => {
-		const handleWindowBeforeUnload = () => {
-			peerConnectionRef.current?.close();
-			peerConnectionRef.current = null;
+		const player = document.getElementById(streamVideoPlayerId)
+		const handleMouseUp = () => resetTimer(true)
+		const handleMouseMove = () => resetTimer(true)
+		const handleMouseEnter = () => resetTimer(true)
+		const handleMouseLeave = () => resetTimer(false)
+		player?.addEventListener('mouseup', handleMouseUp)
+		player?.addEventListener('mousemove', handleMouseMove)
+		player?.addEventListener('mouseenter', handleMouseEnter)
+		player?.addEventListener('mouseleave', handleMouseLeave)
+
+		let currentPeerConnection: RTCPeerConnection | null = null
+		const beforeUnloadHandler = () => currentPeerConnection?.close()
+		window.addEventListener("beforeunload", beforeUnloadHandler)
+
+		const setupPeerConnection = () => {
+			const setupProps: SetupPeerConnectionProps = {
+				...peerConnectionConfig,
+				onStreamRestart: setupPeerConnection,
+			}
+
+			PeerConnectionSetup(setupProps)
+				.then((peerConnection) => {
+					currentPeerConnection = peerConnection
+				})
+				.catch((err) => console.log("PeerConnectionConfig.Error", err))
 		}
 
-		const handleOverlayTimer = (isVisible: boolean) => resetTimer(isVisible);
-		const player = document.getElementById(streamVideoPlayerId)
-		
-		player?.addEventListener('mousemove', () => handleOverlayTimer(true))
-		player?.addEventListener('mouseenter', () => handleOverlayTimer(true))
-		player?.addEventListener('mouseleave', () => handleOverlayTimer(false))
-		player?.addEventListener('mouseup', () => handleOverlayTimer(true))
-
-		window.addEventListener("beforeunload", handleWindowBeforeUnload)
-
-		peerConnectionRef.current = new RTCPeerConnection();
+		setupPeerConnection()
 
 		return () => {
-			peerConnectionRef.current?.close()
-			peerConnectionRef.current = null
-			
-			videoRef.current?.removeEventListener("playing", setHasSignalHandler)
+			onChatAdapterChange?.(streamKey, undefined)
+			onReactionAdapterChange?.(streamKey, undefined)
+			player?.removeEventListener('mouseup', handleMouseUp)
+			player?.removeEventListener('mouseenter', handleMouseEnter)
+			player?.removeEventListener('mouseleave', handleMouseLeave)
+			player?.removeEventListener('mousemove', handleMouseMove)
 
-			player?.removeEventListener('mouseenter', () => handleOverlayTimer)
-			player?.removeEventListener('mouseleave', () => handleOverlayTimer)
-			player?.removeEventListener('mousemove', () => handleOverlayTimer)
-			player?.removeEventListener('mouseup', () => handleOverlayTimer)
-
-			window.removeEventListener("beforeunload", handleWindowBeforeUnload)
-			
+			window.removeEventListener("beforeunload", beforeUnloadHandler)
+			currentPeerConnection?.close()
 			clearTimeout(videoOverlayVisibleTimeoutRef.current)
 		}
-	}, [])
+	}, [onChatAdapterChange, onReactionAdapterChange, onStreamStatusChange, peerConnectionConfig, resetTimer, streamKey, streamVideoPlayerId])
 
 	useEffect(() => {
-		hasSignalRef.current = hasSignal;
-
-		const intervalHandler = () => {
-			if (!peerConnectionRef.current) {
-				return
-			}
-
-			let receiversHasPacketLoss = false;
-			peerConnectionRef.current
-				.getReceivers()
-				.forEach(receiver => {
-					if (receiver) {
-						receiver.getStats()
-							.then(stats => {
-								stats.forEach(report => {
-										if (report.type === "inbound-rtp") {
-											const lossRate = report.packetsLost / (report.packetsLost + report.packetsReceived);
-											receiversHasPacketLoss = receiversHasPacketLoss ? true : lossRate > 5;
-										}
-									}
-								)
-							})
-					}
-				})
-
-			setHasPacketLoss(() => receiversHasPacketLoss);
-		}
-
-		const interval = setInterval(intervalHandler, hasSignal ? 15_000 : 2_500)
-
-		return () => clearInterval(interval);
-	}, [hasSignal]);
-
-	useEffect(() => {
-		if (!peerConnectionRef.current) {
+		if (!reactionAdapter) {
 			return;
 		}
-		
-		peerConnectionRef.current.ontrack = (event: RTCTrackEvent) => {
-			if (videoRef.current) {
-				videoRef.current.srcObject = event.streams[0];
-				videoRef.current.addEventListener("playing", setHasSignalHandler)
-			}
+
+		const unsubscribe = reactionAdapter.subscribe(
+			addReactionAnimation,
+			(status) => onReactionStatusChange?.(streamKey, status),
+			(error) => console.log("ReactionDataChannel.Error", error),
+		);
+		reactionAdapter.connect(streamKey).catch((err) => console.log("ReactionDataChannel.Connect.Error", err));
+
+		return () => {
+			unsubscribe();
+			onReactionStatusChange?.(streamKey, undefined);
+		};
+	}, [addReactionAnimation, onReactionStatusChange, reactionAdapter, streamKey]);
+
+	useEffect(() => {
+		if (localReactionEventId > 0) {
+			addReactionAnimation();
 		}
-
-		peerConnectionRef.current.addTransceiver('audio', {direction: 'recvonly'})
-		peerConnectionRef.current.addTransceiver('video', {direction: 'recvonly'})
-
-		peerConnectionRef.current
-			.createOffer()
-			.then(offer => {
-				offer["sdp"] = offer["sdp"]!.replace("useinbandfec=1", "useinbandfec=1;stereo=1")
-
-				peerConnectionRef.current!
-					.setLocalDescription(offer)
-					.catch((err) => console.error("SetLocalDescription", err));
-
-				fetch(`${apiPath}/whep`, {
-					method: 'POST',
-					body: offer.sdp,
-					headers: {
-						Authorization: `Bearer ${streamKey}`,
-						'Content-Type': 'application/sdp'
-					}
-				}).then(r => {
-					setConnectFailed(r.status !== 201)
-					if (connectFailed) {
-						throw new DOMException("WHEP endpoint did not return 201");
-					}
-
-					const parsedLinkHeader = parseLinkHeader(r.headers.get('Link'))
-
-					if (parsedLinkHeader === null || parsedLinkHeader === undefined) {
-						throw new DOMException("Missing link header");
-					}
-
-					layerEndpointRef.current = `${window.location.protocol}//${parsedLinkHeader['urn:ietf:params:whep:ext:core:layer'].url}`
-
-					const evtSource = new EventSource(`${window.location.protocol}//${parsedLinkHeader['urn:ietf:params:whep:ext:core:server-sent-events'].url}`)
-					evtSource.onerror = _ => evtSource.close();
-
-					evtSource.addEventListener("layers", event => {
-						const parsed = JSON.parse(event.data)
-						setVideoLayers(() => parsed['1']['layers'].map((layer: any) => layer.encodingId))
-					})
-
-					return r.text()
-				}).then(answer => {
-					peerConnectionRef.current!.setRemoteDescription({
-						sdp: answer,
-						type: 'answer'
-					}).catch((err) => console.error("RemoteDescription", err))
-				}).catch((err) => console.error("PeerConnectionError", err))
-			})
-	}, [peerConnectionRef])
+	}, [addReactionAnimation, localReactionEventId]);
 
 	return (
-		<div
-			id={streamVideoPlayerId}
-			className="inline-block w-full relative z-0"
-			style={cinemaMode ? {
-				maxHeight: '100vh',
-				maxWidth: '100vw',
-			} : {}}>
-			{connectFailed && <p className='bg-red-700 text-white text-lg text-center p-4 rounded-t-lg whitespace-pre-wrap'>Failed to start Broadcast Box session 👮 </p>}
+		<div className={`w-full flex items-end ${fillContainer ? "h-full" : ""}`}>
 			<div
-				onClick={handleVideoPlayerClick}
-				onDoubleClick={handleVideoPlayerDoubleClick}
-				className={`
+				key={`${streamVideoPlayerId}`}
+				id={streamVideoPlayerId}
+				className={`inline-block w-full relative z-0 rounded-md ${fillContainer ? "h-full" : "aspect-video"}`}
+				style={cinemaMode ? {
+					maxHeight: '100vh',
+					maxWidth: '100vw',
+				} : {}}>
+
+				<div className="absolute flex rounded-md w-full h-full">
+
+				<div
+					onClick={handleVideoPlayerClick}
+					onDoubleClick={handleVideoPlayerDoubleClick}
+					className={`
 					absolute
 					rounded-md
 					w-full
 					h-full
-					z-10
-					${!hasSignal && "bg-gray-800"}
-					${hasSignal && `
+					z-20
+					${streamState !== "Playing" && "bg-gray-950"}
+					${streamState === "Playing" && `
 						transition-opacity
 						duration-500
 						hover: ${videoOverlayVisible ? 'opacity-100' : 'opacity-0'}
 						${!videoOverlayVisible ? 'cursor-none' : 'cursor-default'}
 					`}
 				`}
-			>
+				>
 
-				{/*Opaque background*/}
-				<div className={`absolute w-full bg-gray-950 ${!hasSignal ? 'opacity-40' : 'opacity-0'} h-full bg-red-100`} />
+					{/*Buttons */}
+						{videoElement !== null && (
+						<div className="absolute bottom-0 h-8 w-full flex place-items-end z-30">
+							<div
+								onClick={stopOverlayClickPropagation}
+								onDoubleClick={stopOverlayClickPropagation}
+								className="player-drag-handle bg-blue-950 w-full flex flex-row gap-2 h-1/14 p-1 max-h-8 min-h-8 rounded-md cursor-move">
 
-				{/*Buttons */}
-				{videoRef.current !== null && (
-					<div className="absolute bottom-0 h-8 w-full flex place-items-end z-20">
-						<div
-							onClick={(e) => e.stopPropagation()}
-							className="bg-blue-950 w-full flex flex-row gap-2 h-1/14 rounded-b-md p-1 max-h-8 min-h-8">
+								<span className="player-drag-cancel flex h-full items-center cursor-pointer">
+									<PlayPauseComponent videoRef={videoRef} />
+								</span>
 
-							<PlayPauseComponent videoRef={videoRef}/>
+								<span className="player-drag-cancel flex h-full items-center cursor-pointer">
+									<VolumeComponent
+										isMuted={isVideoMuted}
+										volume={videoVolume}
+										isDisabled={audioLayers.length === 0}
+										onVolumeChanged={(newValue) => {
+											if (videoRef.current) {
+												videoRef.current.volume = newValue / 100
+											}
+										}}
+										onStateChanged={(newState) => {
+											if (videoRef.current) {
+												videoRef.current.muted = newState
+											}
+										}}
+									/>
+								</span>
 
-							<VolumeComponent
-								isMuted={videoRef.current?.muted ?? false}
-								onVolumeChanged={(newValue) => videoRef.current!.volume = newValue}
-								onStateChanged={(newState) => videoRef.current!.muted = newState}
-							/>
+								<div className="w-full pointer-events-none"></div>
 
-							<div className="w-full"></div>
+								<span className="player-drag-cancel flex h-full items-center cursor-default">
+									<CurrentViewersComponent currentViewersCount={currentStreamStatus?.viewers ?? 0} />
+								</span>
+								<span className="player-drag-cancel flex h-full items-center cursor-pointer">
+									<VideoLayerSelectorComponent layers={videoLayers} layerEndpoint={layerEndpoint} hasPacketLoss={false} currentLayer={currentLayersStatus?.videoLayerCurrent ?? ""} />
+								</span>
 
-							{hasSignal && <CurrentViewersComponent streamKey={streamKey}/>}
-							<QualitySelectorComponent layers={videoLayers} layerEndpoint={layerEndpointRef.current} hasPacketLoss={hasPacketLoss}/>
-							<Square2StackIcon onClick={() => videoRef.current?.requestPictureInPicture()}/>
-							<ArrowsPointingOutIcon onClick={() => videoRef.current?.requestFullscreen()}/>
+								{audioLayers.length > 1 && (
+									<span className="player-drag-cancel flex h-full items-center cursor-pointer">
+										<AudioLayerSelectorComponent layers={audioLayers} layerEndpoint={layerEndpoint} hasPacketLoss={false} currentLayer={currentLayersStatus?.videoLayerCurrent ?? ""} />
+									</span>
+								)}
 
-						</div>
-					</div>)}
+								<Square2StackIcon className="player-drag-cancel cursor-pointer" onClick={() => videoElement?.requestPictureInPicture()} />
+								<ArrowsPointingOutIcon className="player-drag-cancel cursor-pointer" onClick={handleEnterFullscreen} />
+							</div>
+						</div>)
+					}
 
-				{!!props.onCloseStream && (
-					<button
-						onClick={props.onCloseStream}
-						className="absolute top-2 right-2 p-2 rounded-full bg-red-400 hover:bg-red-500 pointer-events-auto">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							className="h-6 w-6 text-gray-700"
-							viewBox="0 0 24 24"
-							fill="black"
+					{/* Status messages */}
+					<StatusMessageComponent
+						streamKey={streamKey}
+						state={streamState}
+					/>
+
+					<div
+						onDoubleClick={stopOverlayClickPropagation}
+						className="absolute top-2 right-2 flex flex-row gap-2 pointer-events-auto z-60">
+					{!!onToggleChat && (
+						<button
+							onClick={(e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								onToggleChat();
+							}}
+							className={`p-2 rounded-full border ${isChatOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-black/60 border-gray-700 text-gray-200 hover:bg-gray-800'}`}
 						>
-							<path
-								fillRule="evenodd"
-								d="M6.225 6.225a.75.75 0 011.06 0L12 10.94l4.715-4.715a.75.75 0 111.06 1.06L13.06 12l4.715 4.715a.75.75 0 11-1.06 1.06L12 13.06l-4.715 4.715a.75.75 0 11-1.06-1.06L10.94 12 6.225 7.285a.75.75 0 010-1.06z"
-								clipRule="evenodd"
+							<ChatBubbleLeftRightIcon className="h-5 w-5" />
+						</button>
+					)}
+
+						{!!onCloseStream && (
+							<button
+								onClick={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									onCloseStream();
+								}}
+								className="p-2 rounded-full bg-red-400 hover:bg-red-500">
+								<XMarkIcon className="h-6 w-6 text-black" />
+							</button>
+						)}
+					</div>
+
+				</div>
+
+					<video
+						key={`${streamVideoPlayerId}_video`}
+						ref={setVideoRef}
+					autoPlay
+					muted={isVideoMuted}
+					playsInline
+					className="rounded-md w-full h-full relative bg-gray-950"
+					onPlaying={() => setStreamState("Playing")}
+					onLoadStart={() => setStreamState("Loading")}
+					onVolumeChange={(event) => {
+						setIsVideoMuted(event.currentTarget.muted)
+						setVideoVolume(Math.round(event.currentTarget.volume * 100))
+					}}
+						onLoadedData={(event) => {
+							console.log("VideoPlayer.onLoadedMetadata", event)
+							event.currentTarget.volume = videoVolume / 100
+							event.currentTarget.play()
+						}}
+					onError={(error) => console.log("VideoPlayer.Error", error)}
+					onErrorCapture={(error) => console.log("VideoPlayer.ErrorCapture", error)}
+					onEnded={() => setStreamState("Offline")}
+				/>
+
+					<div className="pointer-events-none absolute right-5 bottom-10 z-70 h-20 w-14 overflow-visible">
+						{reactionAnimations.map((reaction) => (
+							<HeartIcon
+								key={reaction.id}
+								className="animate-reaction-float absolute right-0 bottom-0 h-7 w-7 text-rose-500 drop-shadow"
+								style={{ "--reaction-x": `${reaction.x}px` } as CSSProperties}
+								onAnimationEnd={() => setReactionAnimations((current) => current.filter((item) => item.id !== reaction.id))}
 							/>
-						</svg>
-					</button>
-				)}
+						))}
+					</div>
 
-				{videoLayers.length === 0 && !hasSignal && (
-					<h2
-						className="absolute w-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-light leading-tight text-4xl text-center">
-						{props.streamKey} is not currently streaming
-					</h2>
-				)}
-				{videoLayers.length > 0 && !hasSignal && (
-						<h2
-							className="absolute animate-pulse w-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-light leading-tight text-4xl text-center">
-							Loading video
-						</h2>
-				)}
-
+				</div>
 			</div>
-
-			<video
-				ref={videoRef}
-				autoPlay
-				muted
-				playsInline
-				className="bg-transparent rounded-md w-full h-full relative"
-			/>
 		</div>
 	)
 }

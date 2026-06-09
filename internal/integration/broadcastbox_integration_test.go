@@ -48,33 +48,36 @@ func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 		if status.WHIPICEConnectionState != "connected" {
 			return false, fmt.Sprintf("WHIP ICE state=%q", status.WHIPICEConnectionState)
 		}
-		if status.AudioPacketsReceived == 0 {
-			return false, "audioPacketsReceived=0"
+		if len(status.AudioTracks) != 1 {
+			return false, fmt.Sprintf("audioTracks=%d", len(status.AudioTracks))
 		}
-		if len(status.VideoStreams) != 1 {
-			return false, fmt.Sprintf("videoStreams=%d", len(status.VideoStreams))
+		if status.AudioTracks[0].PacketsReceived == 0 {
+			return false, "publisher audio packets=0"
 		}
-		if status.VideoStreams[0].PacketsReceived < 20 || status.VideoStreams[0].FramesReceived < 5 {
-			return false, fmt.Sprintf("publisher video packets=%d frames=%d", status.VideoStreams[0].PacketsReceived, status.VideoStreams[0].FramesReceived)
+		if len(status.VideoTracks) != 1 {
+			return false, fmt.Sprintf("videoTracks=%d", len(status.VideoTracks))
 		}
-		if status.VideoStreams[0].KeyframesReceived == 0 {
+		if status.VideoTracks[0].PacketsReceived < 20 || status.VideoTracks[0].FramesReceived < 5 {
+			return false, fmt.Sprintf("publisher video packets=%d frames=%d", status.VideoTracks[0].PacketsReceived, status.VideoTracks[0].FramesReceived)
+		}
+		if status.VideoTracks[0].KeyframesReceived == 0 {
 			return false, "publisher keyframesReceived=0"
 		}
-		if len(status.WHEPSessions) != len(viewers) {
-			return false, fmt.Sprintf("whepSessions=%d", len(status.WHEPSessions))
+		if len(status.Sessions) != len(viewers) {
+			return false, fmt.Sprintf("sessions=%d", len(status.Sessions))
 		}
-		for _, session := range status.WHEPSessions {
+		for _, session := range status.Sessions {
 			if session.ICEConnectionState != "connected" {
 				return false, fmt.Sprintf("WHEP %s ICE state=%q", session.ID, session.ICEConnectionState)
 			}
-			if session.PacketsWritten < 20 || session.FramesWritten < 5 {
-				return false, fmt.Sprintf("WHEP %s packets=%d frames=%d", session.ID, session.PacketsWritten, session.FramesWritten)
+			if session.VideoPacketsWritten < 20 || session.VideoFramesWritten < 5 {
+				return false, fmt.Sprintf("WHEP %s videoPackets=%d videoFrames=%d", session.ID, session.VideoPacketsWritten, session.VideoFramesWritten)
 			}
-			if session.KeyframesWritten == 0 {
-				return false, fmt.Sprintf("WHEP %s keyframesWritten=0", session.ID)
+			if session.VideoKeyframesWritten == 0 {
+				return false, fmt.Sprintf("WHEP %s videoKeyframesWritten=0", session.ID)
 			}
-			if session.PacketsQueueDropped != 0 {
-				return false, fmt.Sprintf("WHEP %s packetsQueueDropped=%d", session.ID, session.PacketsQueueDropped)
+			if session.VideoPacketsDropped != 0 {
+				return false, fmt.Sprintf("WHEP %s videoPacketsDropped=%d", session.ID, session.VideoPacketsDropped)
 			}
 		}
 
@@ -95,8 +98,8 @@ func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 		if status == nil {
 			return true, ""
 		}
-		if len(status.WHEPSessions) != 0 {
-			return false, fmt.Sprintf("whepSessions still active=%d", len(status.WHEPSessions))
+		if len(status.Sessions) != 0 {
+			return false, fmt.Sprintf("sessions still active=%d", len(status.Sessions))
 		}
 		return true, ""
 	})
@@ -205,8 +208,8 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 		if status == nil {
 			return false, "stream not present in status"
 		}
-		if len(status.WHEPSessions) != len(viewers) {
-			return false, fmt.Sprintf("whepSessions=%d", len(status.WHEPSessions))
+		if len(status.Sessions) != len(viewers) {
+			return false, fmt.Sprintf("sessions=%d", len(status.Sessions))
 		}
 		for _, viewer := range viewers {
 			if viewer.videoPackets.Load() < 20 || viewer.videoFrames.Load() < 5 {
@@ -234,8 +237,8 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 		if status.WHIPICEConnectionState != "connected" {
 			return false, fmt.Sprintf("WHIP ICE state=%q", status.WHIPICEConnectionState)
 		}
-		if len(status.WHEPSessions) != 0 {
-			return false, fmt.Sprintf("whepSessions still active=%d", len(status.WHEPSessions))
+		if len(status.Sessions) != 0 {
+			return false, fmt.Sprintf("sessions still active=%d", len(status.Sessions))
 		}
 		return true, ""
 	})

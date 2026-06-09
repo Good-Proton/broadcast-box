@@ -30,7 +30,7 @@ type webhookResponse struct {
 }
 
 const (
-	whepServerUrl  = "http://127.0.0.1:8080/api/whep"
+	whepServerURL  = "http://127.0.0.1:8080/api/whep"
 	fileNameLength = 16
 	readTimeout    = time.Second * 5
 )
@@ -66,7 +66,7 @@ func startRecording(streamKey string) {
 		panic(err)
 	}
 
-	req, err := http.NewRequest("POST", whepServerUrl, bytes.NewBuffer([]byte(offer.SDP)))
+	req, err := http.NewRequest("POST", whepServerURL, bytes.NewBuffer([]byte(offer.SDP)))
 	if err != nil {
 		panic(err)
 	}

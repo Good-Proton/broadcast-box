@@ -5,24 +5,70 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/pion/ice/v3"
+	"github.com/pion/ice/v4"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 
+	"github.com/glimesh/broadcast-box/internal/environment"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
 	internalwebrtc "github.com/glimesh/broadcast-box/internal/webrtc"
+	"github.com/glimesh/broadcast-box/internal/webrtc/codecs"
 )
 
-func Run(whepHandler func(res http.ResponseWriter, req *http.Request)) error {
-	m := &webrtc.MediaEngine{}
-	if err := internalwebrtc.PopulateMediaEngine(m); err != nil {
-		return err
+const (
+	networkTestIntroMessage   = "\033[0;33mNETWORK_TEST_ON_START is enabled. If the test fails Broadcast Box will exit.\nSee the README for how to debug or disable NETWORK_TEST_ON_START\033[0m"
+	networkTestSuccessMessage = "\033[0;32mNetwork Test passed.\nHave fun using Broadcast Box.\033[0m"
+	networkTestFailedMessage  = "\033[0;31mNetwork Test failed.\n%s\nPlease see the README and join Discord for help\033[0m"
+)
+
+func RunNetworkTest() {
+
+	fmt.Println(networkTestIntroMessage)
+
+	err := run(networkTestWHIPHandler)
+	if err != nil {
+		fmt.Printf(networkTestFailedMessage, err)
+		os.Exit(1)
 	}
+
+	fmt.Println(networkTestSuccessMessage)
+}
+
+func networkTestWHIPHandler(res http.ResponseWriter, req *http.Request) {
+	offer, err := io.ReadAll(req.Body)
+	if err != nil || string(offer) == "" {
+		http.Error(res, "error reading offer", http.StatusBadRequest)
+		return
+	}
+
+	answer, sessionID, err := internalwebrtc.WHIP(string(offer), authorization.PublicProfile{
+		StreamKey: "networktest",
+		IsPublic:  false,
+		MOTD:      "Network test",
+	})
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	res.Header().Add("Location", "/api/whip/"+sessionID)
+	res.Header().Add("Content-Type", "application/sdp")
+	res.WriteHeader(http.StatusCreated)
+	_, _ = fmt.Fprint(res, answer)
+}
+
+func run(whipHandler func(res http.ResponseWriter, req *http.Request)) error {
+	m := &webrtc.MediaEngine{}
+
+	codecs.RegisterCodecs(m)
 
 	s := webrtc.SettingEngine{}
 	s.SetNetworkTypes([]webrtc.NetworkType{
@@ -70,7 +116,7 @@ func Run(whepHandler func(res http.ResponseWriter, req *http.Request)) error {
 	req.Header["Authorization"] = []string{"Bearer networktest"}
 	recorder := httptest.NewRecorder()
 
-	whepHandler(recorder, req)
+	whipHandler(recorder, req)
 	res := recorder.Result()
 
 	if res.StatusCode != 201 {
@@ -88,6 +134,8 @@ func Run(whepHandler func(res http.ResponseWriter, req *http.Request)) error {
 		return err
 	}
 
+	httpAddress := os.Getenv(environment.HTTPAddress)
+
 	firstMediaSection := answerParsed.MediaDescriptions[0]
 	filteredAttributes := []sdp.Attribute{}
 	for i := range firstMediaSection.Attributes {
@@ -104,14 +152,32 @@ func Run(whepHandler func(res http.ResponseWriter, req *http.Request)) error {
 				return fmt.Errorf("candidate with invalid IP %s", c.Address())
 			}
 
+			if httpAddress != "" && httpAddress == ip.String() {
+				slog.Info("Found match for HTTP_ADDRESS", "ip", ip)
+				filteredAttributes = append(filteredAttributes, a)
+				break
+			}
+
 			if !ip.IsPrivate() {
 				filteredAttributes = append(filteredAttributes, a)
 			}
+
 		} else {
 			filteredAttributes = append(filteredAttributes, a)
 		}
+
 	}
+
 	firstMediaSection.Attributes = filteredAttributes
+	candidateString, candidateExists := firstMediaSection.Attribute("candidate")
+	if candidateExists {
+		candidate, err := ice.UnmarshalCandidate(candidateString)
+		if err != nil {
+			slog.Error("Error unmarshalling candidate", "err", err)
+		}
+
+		slog.Info("Using test address", "address", candidate.Address())
+	}
 
 	answer, err := answerParsed.Marshal()
 	if err != nil {

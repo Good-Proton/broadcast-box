@@ -1,28 +1,60 @@
-﻿import React, {useEffect, useMemo, useRef, useState} from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-interface WhepSession {
+export interface StreamStatus {
+	streamKey: string;
+	motd: string;
+	viewers: number;
+	isOnline: boolean;
+}
+
+export interface WhepSession {
 	id: string;
-	currentLayer: string;
+
+	audioLayerCurrent: string;
+	audioTimestamp: string;
+	audioPacketsWritten: number;
+	audioSequenceNumber: number;
+
+	videoBitrate: number;
+	videoLayerCurrent: string;
+	videoTimestamp: string;
+	videoPacketsWritten: number;
+	videoSequenceNumber: number;
+
 	sequenceNumber: number;
 	timestamp: number;
-	packetsWritten: number;
 }
 
-interface StatusResult {
+export interface StatusResult {
 	streamKey: string;
-	whepSessions: WhepSession[];
-	videoStreams: VideoStream[];
+	motd: string;
+	streamStart: Date;
+
+	videoTracks: VideoTrack[];
+	audioTracks: AudioTrack[];
+
+	sessions: WhepSession[];
 }
 
-interface VideoStream {
+interface VideoTrack {
+	rid: string;
+	bitrate: number;
+	packetsReceived: number;
+	packetsDropped: number;
+	lastKeyframe: string;
+}
+
+interface AudioTrack {
 	rid: string;
 	packetsReceived: number;
-	lastKeyFrameSeen: string;
+	packetsDropped: number;
 }
 
 interface StatusProviderProps {
 	children: React.ReactNode;
 }
+
+const STATUS_POLL_INTERVAL_MS = 5000;
 
 class FetchError extends Error {
 	status: number;
@@ -33,12 +65,11 @@ class FetchError extends Error {
 	}
 }
 
-const apiPath = import.meta.env.VITE_API_PATH;
 const fetchStatus = (
 	onSuccess?: (statusResults: StatusResult[]) => void,
 	onError?: (error: FetchError) => void
 ) =>
-	fetch(`${apiPath}/status`, {
+	fetch(`/api/status`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -50,79 +81,97 @@ const fetchStatus = (
 		if (!result.ok) {
 			throw new FetchError('Unknown error when calling status', result.status);
 		}
-
 		return result.json()
 	})
 		.then((result: StatusResult[]) => onSuccess?.(result))
 		.catch((err: FetchError) => onError?.(err));
 
 interface StatusProviderContextProps {
-	streamStatus: StatusResult[] | undefined
+	activeStreamsStatus: StatusResult[] | undefined
+	currentStreamStatus: StreamStatus | undefined,
 	refreshStatus: () => void
+	subscribe: () => void
+	unsubscribe: () => void
+
+	setCurrentStreamStatus: (status: StreamStatus) => void
 }
 
 export const StatusContext = React.createContext<StatusProviderContextProps>({
-	streamStatus: undefined,
-	refreshStatus: () => { }
+	activeStreamsStatus: undefined,
+	currentStreamStatus: undefined,
+	refreshStatus: () => { },
+	subscribe: () => { },
+	unsubscribe: () => { },
+	setCurrentStreamStatus: () => { }
 });
 
 export function StatusProvider(props: StatusProviderProps) {
-	const [isStatusActive, setIsStatusActive] = useState<boolean>(false)
 	const [streamStatus, setStreamStatus] = useState<StatusResult[] | undefined>(undefined)
-	const intervalCountRef = useRef<number>(5000);
-	
-	const fetchStatusResultHandler = (result: StatusResult[]) => {
-		setStreamStatus(_ => result);
-	}
-	const fetchStatusErrorHandler = (error: FetchError) => {
-		console.error("StatusProviderError", error.status, error.message)
+	const [currentStreamStatus, setCurrentStreamStatusState] = useState<StreamStatus | undefined>(undefined)
+	const intervalRef = useRef<number | undefined>(undefined)
+	const subscribers = useRef<number>(0)
 
+	const fetchStatusResultHandler = useCallback((result: StatusResult[]) => {
+		setStreamStatus(() => result);
+	}, [])
+
+	const fetchStatusErrorHandler = useCallback((error: FetchError) => {
 		if (error.status === 503) {
-			setIsStatusActive(() => false)
 			setStreamStatus(() => undefined);
 		}
-	}
+	}, [])
 
-	useEffect(() => {
-		fetchStatus(
-			(result) => {
-				setStreamStatus(_ => result)
-				setIsStatusActive(_ => true)
-			},
-			(error) => {
-				if (error.status === 503) {
-					setIsStatusActive(() => false)
-					setStreamStatus(() => undefined);
-				}
-				
-				console.error("StatusProviderError", error.status, error.message)
-			})
-			.catch((err) => console.error("StatusProviderError", err))
-	}, []);
+	const refreshStatus = useCallback(async () => {
+		await fetchStatus(fetchStatusResultHandler, fetchStatusErrorHandler)
+	}, [fetchStatusErrorHandler, fetchStatusResultHandler])
 
-	useEffect(() => {
-		if (!isStatusActive) {
-			return
+	const refreshStatusContext = useCallback(() => {
+		void refreshStatus()
+	}, [refreshStatus])
+
+	const stopFetching = useCallback(() => {
+		clearInterval(intervalRef.current)
+		intervalRef.current = undefined
+	}, [])
+
+	const startFetching = useCallback(() => {
+		if (!intervalRef.current) {
+			intervalRef.current = setInterval(() => {
+				void refreshStatus()
+			}, STATUS_POLL_INTERVAL_MS)
 		}
+	}, [refreshStatus])
 
-		const intervalHandler = async () => {
-			await fetchStatus(
-				fetchStatusResultHandler,
-				fetchStatusErrorHandler)
+	const subscribe = useCallback(() => {
+		subscribers.current++;
+
+		if (subscribers.current >= 1) {
+			startFetching()
 		}
+	}, [startFetching])
 
-		const interval = setInterval(intervalHandler, intervalCountRef.current)
-		return () => clearInterval(interval)
-	}, [isStatusActive]);
+	const unsubscribe = useCallback(() => {
+		subscribers.current--;
+
+		if (subscribers.current === 0) {
+			stopFetching()
+		}
+	}, [stopFetching])
+
+	const setCurrentStreamStatus = useCallback((value: StreamStatus) => {
+		setCurrentStreamStatusState(() => value)
+	}, [])
+
+	useEffect(() => stopFetching, [stopFetching])
 
 	const state = useMemo<StatusProviderContextProps>(() => ({
-		streamStatus: streamStatus,
-		refreshStatus: async () => {
-			await fetchStatus(
-				fetchStatusResultHandler,
-				fetchStatusErrorHandler)
-		}
-	}), [streamStatus]);
+		activeStreamsStatus: streamStatus,
+		currentStreamStatus: currentStreamStatus,
+		refreshStatus: refreshStatusContext,
+		subscribe: subscribe,
+		unsubscribe: unsubscribe,
+		setCurrentStreamStatus: setCurrentStreamStatus
+	}), [currentStreamStatus, refreshStatusContext, setCurrentStreamStatus, streamStatus, subscribe, unsubscribe]);
 
 	return (
 		<StatusContext.Provider value={state}>

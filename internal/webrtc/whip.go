@@ -2,428 +2,52 @@ package webrtc
 
 import (
 	"errors"
-	"fmt"
-	"io"
-	"math"
-	"strings"
-	"time"
+	"log/slog"
 
-	"github.com/glimesh/broadcast-box/internal/auth"
-	"github.com/glimesh/broadcast-box/internal/logger"
-	"github.com/google/uuid"
-	"github.com/pion/rtcp"
-	"github.com/pion/rtp"
-	"github.com/pion/rtp/codecs"
-	"github.com/pion/webrtc/v4"
-	"go.uber.org/zap"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
+	"github.com/glimesh/broadcast-box/internal/webrtc/peerconnection"
+	"github.com/glimesh/broadcast-box/internal/webrtc/sessions/manager"
+	"github.com/glimesh/broadcast-box/internal/webrtc/utils"
 )
 
-const publisherKeyframeRequestMinInterval = 500 * time.Millisecond
+// Initialize WHIP session for incoming stream
+func WHIP(offer string, profile authorization.PublicProfile) (sdp string, sessionID string, err error) {
+	slog.Info("WHIP.Offer.Requested", "streamKey", profile.StreamKey, "motd", profile.MOTD)
 
-func audioWriter(remoteTrack *webrtc.TrackRemote, stream *stream) {
-	rtpBuf := make([]byte, 1500)
-	for {
-		rtpRead, _, err := remoteTrack.Read(rtpBuf)
-		switch {
-		case errors.Is(err, io.EOF):
-			return
-		case err != nil:
-			logger.Error("Failed to read audio RTP packet", zap.Error(err))
-			return
-		}
-
-		stream.audioPacketsReceived.Add(1)
-		if _, writeErr := stream.audioTrack.Write(rtpBuf[:rtpRead]); writeErr != nil && !errors.Is(writeErr, io.ErrClosedPipe) {
-			logger.Error("Failed to write audio RTP packet", zap.Error(writeErr))
-			return
-		}
-	}
-}
-
-func videoWriter(remoteTrack *webrtc.TrackRemote, stream *stream, peerConnection *webrtc.PeerConnection, s *stream, sessionId string, receiver *webrtc.RTPReceiver) {
-	id := remoteTrack.RID()
-	if id == "" {
-		id = videoTrackLabelDefault
+	if err := utils.ValidateOffer(offer); err != nil {
+		return "", "", errors.New("invalid offer: " + err.Error())
 	}
 
-	codecMimeType := remoteTrack.Codec().MimeType
-	ssrc := uint32(remoteTrack.SSRC())
-
-	videoTrack, err := addTrack(s, id, sessionId, codecMimeType, ssrc, receiver)
+	session, err := manager.SessionsManager.GetOrAddSession(profile, true)
 	if err != nil {
-		logger.Error("Failed to add video track",
-			zap.Error(err),
-			zap.String("rid", id),
-			zap.String("sessionId", sessionId),
-		)
-		return
+		return "", "", err
 	}
 
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-stream.whipActiveContext.Done():
-				return
-			case <-ticker.C:
-				if receiver == nil {
-					continue
-				}
-
-				now := time.Now()
-				rtcpPackets, _, err := receiver.ReadRTCP()
-				if err != nil {
-					logger.Debug("Failed to read whip RTCP packets",
-						zap.Error(err),
-						zap.String("rid", id),
-						zap.String("sessionId", sessionId),
-					)
-					break
-				}
-
-				logger.Debug("Received whip rtcpPackets",
-					zap.Int("length", len(rtcpPackets)),
-					zap.String("rid", id),
-					zap.String("sessionId", sessionId),
-					zap.Uint32("ssrc", ssrc),
-				)
-
-				for _, pkt := range rtcpPackets {
-					switch rtcpPkt := pkt.(type) {
-					case *rtcp.SenderReport:
-						logger.Debug("Received whip SenderReport",
-							zap.Int("reportCount", len(rtcpPkt.Reports)),
-							zap.Uint32("ssrc", ssrc),
-							zap.String("rid", id),
-							zap.String("sessionId", sessionId),
-						)
-
-						for _, report := range rtcpPkt.Reports {
-							currentLastReport := uint32(videoTrack.lastSenderReport.Load())
-
-							if report.SSRC == ssrc {
-								if currentLastReport <= report.LastSenderReport {
-									videoTrack.jitter.Store(uint64(report.Jitter))
-									videoTrack.delay.Store(uint64(report.Delay))
-									videoTrack.totalLost.Store(uint64(report.TotalLost))
-									videoTrack.lastSenderReport.Store(uint64(report.LastSenderReport))
-									videoTrack.lastRTCPTime.Store(now)
-
-									break
-								} else {
-									logger.Debug("Outdated SenderReport received",
-										zap.Uint32("currentLastReport", currentLastReport),
-										zap.Uint32("receivedLastReport", report.LastSenderReport),
-										zap.Uint32("ssrc", ssrc),
-										zap.String("rid", id),
-										zap.String("sessionId", sessionId),
-									)
-								}
-							}
-						}
-					}
-				}
+	peerConnection, err := peerconnection.CreateWHIPPeerConnection(offer)
+	if err != nil || peerConnection == nil {
+		slog.Error("WHIP.CreateWHIPPeerConnection.Failed", "err", err)
+		if peerConnection != nil {
+			if closeErr := peerConnection.Close(); closeErr != nil {
+				slog.Error("WHIP.CreateWHIPPeerConnection.Close.Failed", "err", closeErr)
 			}
 		}
-	}()
-
-	rtpBuf := make([]byte, 1500)
-	rtpPkt := &rtp.Packet{}
-	codec := getVideoTrackCodec(remoteTrack.Codec().MimeType)
-
-	var depacketizer rtp.Depacketizer
-	switch codec {
-	case videoTrackCodecH264:
-		depacketizer = &codecs.H264Packet{}
-	case videoTrackCodecVP8:
-		depacketizer = &codecs.VP8Packet{}
-	case videoTrackCodecVP9:
-		depacketizer = &codecs.VP9Packet{}
+		return "", "", err
 	}
 
-	lastTimestamp := uint32(0)
-	lastTimestampSet := false
-
-	lastSequenceNumber := uint16(0)
-	lastSequenceNumberSet := false
-
-	for {
-		rtpRead, _, err := remoteTrack.Read(rtpBuf)
-		switch {
-		case errors.Is(err, io.EOF):
-			return
-		case err != nil:
-			logger.Error("Failed to read RTP packet",
-				zap.Error(err),
-				zap.String("rid", id),
-				zap.String("sessionId", sessionId),
-			)
-			return
-		}
-
-		if err = rtpPkt.Unmarshal(rtpBuf[:rtpRead]); err != nil {
-			logger.Error("Failed to unmarshal RTP packet",
-				zap.Error(err),
-				zap.String("rid", id),
-				zap.String("sessionId", sessionId),
-			)
-			return
-		}
-
-		now := time.Now()
-
-		// Track first packet time
-		if firstPacket, ok := videoTrack.firstPacketTime.Load().(time.Time); !ok || firstPacket.IsZero() {
-			videoTrack.firstPacketTime.Store(now)
-		}
-		videoTrack.lastPacketTime.Store(now)
-
-		videoTrack.packetsReceived.Add(1)
-		videoTrack.bytesReceived.Add(uint64(rtpRead))
-
-		if rtpPkt.Marker {
-			videoTrack.framesReceived.Add(1)
-		}
-
-		// Keyframe detection has only been implemented for H264
-		isKeyframe := isKeyframe(rtpPkt, codec, depacketizer)
-		if isKeyframe && codec == videoTrackCodecH264 {
-			videoTrack.keyframesReceived.Add(1)
-			videoTrack.lastKeyFrameSeen.Store(now)
-		}
-
-		rtpPkt.Extension = false
-		rtpPkt.Extensions = nil
-
-		timeDiff := int64(rtpPkt.Timestamp) - int64(lastTimestamp)
-		switch {
-		case !lastTimestampSet:
-			timeDiff = 0
-			lastTimestampSet = true
-		case timeDiff < -(math.MaxUint32 / 10):
-			timeDiff += (math.MaxUint32 + 1)
-		}
-
-		sequenceDiff := int(rtpPkt.SequenceNumber) - int(lastSequenceNumber)
-		switch {
-		case !lastSequenceNumberSet:
-			lastSequenceNumberSet = true
-			sequenceDiff = 0
-		case sequenceDiff < -(math.MaxUint16 / 10):
-			sequenceDiff += (math.MaxUint16 + 1)
-		}
-
-		lastTimestamp = rtpPkt.Timestamp
-		lastSequenceNumber = rtpPkt.SequenceNumber
-
-		s.whepSessionsLock.RLock()
-		if len(s.whepSessions) != 0 {
-			payload := append([]byte(nil), rtpPkt.Payload...)
-			packet := *rtpPkt
-			packet.Payload = payload
-
-			for i := range s.whepSessions {
-				packetCopy := packet
-				s.whepSessions[i].enqueueVideoPacket(videoPacket{
-					packet:       packetCopy,
-					layer:        id,
-					timeDiff:     timeDiff,
-					sequenceDiff: sequenceDiff,
-					codec:        codec,
-					isKeyframe:   isKeyframe,
-				})
-			}
-		}
-		s.whepSessionsLock.RUnlock()
-
-	}
-}
-
-func requestPublisherKeyframe(stream *stream, layer, reason, whepSessionId string) {
-	now := time.Now()
-
-	streamMapLock.Lock()
-	peerConnection := stream.publisherConnection
-	if peerConnection == nil {
-		streamMapLock.Unlock()
-		return
+	if err := session.AddHost(peerConnection); err != nil {
+		return "", "", err
 	}
 
-	packets := make([]rtcp.Packet, 0, len(stream.videoTracks))
-	for _, videoTrack := range stream.videoTracks {
-		if layer != "" && videoTrack.rid != layer {
-			continue
-		}
-
-		lastRequest := time.Unix(0, videoTrack.lastKeyframeRequest.Load())
-		if now.Sub(lastRequest) < publisherKeyframeRequestMinInterval {
-			continue
-		}
-		videoTrack.lastKeyframeRequest.Store(now.UnixNano())
-
-		packets = append(packets, &rtcp.PictureLossIndication{
-			MediaSSRC: videoTrack.ssrc,
-		})
-	}
-	streamMapLock.Unlock()
-
-	if len(packets) == 0 {
-		return
+	host := session.Host.Load()
+	if host == nil {
+		return "", "", errors.New("host session not available")
 	}
 
-	if err := peerConnection.WriteRTCP(packets); err != nil {
-		logger.Debug("Failed to request publisher keyframe",
-			zap.Error(err),
-			zap.String("layer", layer),
-			zap.String("reason", reason),
-			zap.String("whepSessionId", whepSessionId),
-		)
-		return
-	}
-
-	logger.Debug("Requested publisher keyframe",
-		zap.Int("requests", len(packets)),
-		zap.String("layer", layer),
-		zap.String("reason", reason),
-		zap.String("whepSessionId", whepSessionId),
-	)
-}
-
-func WHIP(offer string, streamInfo *auth.StreamInfo) (string, error) {
-	logger.Info("Creating WHIP session",
-		zap.String("streamKey", streamInfo.StreamKey),
-		zap.String("lhUserId", streamInfo.LhUserId),
-	)
-
-	maybePrintOfferAnswer(offer, true)
-
-	whipSessionId := uuid.New().String()
-
-	peerConnection, err := newPeerConnection(apiWhip)
-	if err != nil {
-		logger.Error("Failed to create peer connection",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-		)
-		return "", err
-	}
-
-	streamMapLock.Lock()
-	defer streamMapLock.Unlock()
-	stream, err := getStream(streamInfo, whipSessionId)
-	if err != nil {
-		logger.Error("Failed to get stream for WHIP session",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-			zap.String("lhUserId", streamInfo.LhUserId),
-			zap.String("whipSessionId", whipSessionId),
-		)
-		return "", err
-	}
-
-	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, rtpReceiver *webrtc.RTPReceiver) {
-		if strings.HasPrefix(remoteTrack.Codec().MimeType, "audio") {
-			audioWriter(remoteTrack, stream)
-		} else {
-			videoWriter(remoteTrack, stream, peerConnection, stream, whipSessionId, rtpReceiver)
-		}
-	})
-
-	peerConnection.OnICEConnectionStateChange(func(i webrtc.ICEConnectionState) {
-		stream.whipICEConnectionState.Store(i.String())
-
-		if i == webrtc.ICEConnectionStateConnected && stream.whipConnectionEstablishedTime.Load() == 0 {
-			stream.whipConnectionEstablishedTime.Store(uint64(time.Now().Unix()))
-		}
-
-		if i == webrtc.ICEConnectionStateFailed || i == webrtc.ICEConnectionStateClosed {
-			if err := peerConnection.Close(); err != nil {
-				logger.Error("Failed to close peer connection",
-					zap.Error(err),
-					zap.String("streamKey", streamInfo.StreamKey),
-					zap.String("iceState", i.String()),
-				)
-			}
-
-			logger.Info("Disconnecting peer connection",
-				zap.String("side", "whip"),
-				zap.String("reason", "ICE connection state changed"),
-				zap.String("streamKey", streamInfo.StreamKey),
-				zap.String("iceState", i.String()),
-			)
-			peerConnectionDisconnected(true, streamInfo.StreamKey, whipSessionId)
-		}
-	})
-
-	if err := func() error {
-		stream.dataChannelsLock.Lock()
-		defer stream.dataChannelsLock.Unlock()
-
-		stream.publisherConnection = peerConnection
-
-		for whepSessionId := range stream.subscriberConnections {
-			for label := range stream.subscriberDataChannels[whepSessionId] {
-				if err := ensureDataChannelPair(label, stream, nil, &whepSessionId); err != nil {
-					logger.Error("Failed to ensure data channel pair",
-						zap.Error(err),
-						zap.String("label", label),
-						zap.String("whepSessionId", whepSessionId),
-					)
-					return err
-				}
-			}
-		}
-
-		return nil
-	}(); err != nil {
-		return "", err
-	}
-
-	peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-		stream.dataChannelsLock.Lock()
-		label := channel.Label()
-		if err := ensureDataChannelPair(label, stream, channel, nil); err != nil {
-			logger.Error("Failed to ensure data channel pair",
-				zap.Error(err),
-				zap.String("label", label),
-				zap.String("whipSessionId", whipSessionId),
-			)
-		}
-		stream.dataChannelsLock.Unlock()
-	})
-
-	if err := peerConnection.SetRemoteDescription(webrtc.SessionDescription{
-		SDP:  string(offer),
-		Type: webrtc.SDPTypeOffer,
-	}); err != nil {
-		logger.Error("Failed to set remote description",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-		)
-		return "", err
-	}
-
-	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
-	answer, err := peerConnection.CreateAnswer(nil)
-
-	if err != nil {
-		logger.Error("Failed to create answer",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-		)
-		return "", err
-	} else if err = peerConnection.SetLocalDescription(answer); err != nil {
-		logger.Error("Failed to set local description",
-			zap.Error(err),
-			zap.String("streamKey", streamInfo.StreamKey),
-		)
-		return "", err
-	}
-
-	<-gatherComplete
-	return maybePrintOfferAnswer(appendAnswer(peerConnection.LocalDescription().SDP), false), nil
+	sdp = utils.DebugOutputAnswer(utils.AppendCandidateToAnswer(peerConnection.LocalDescription().SDP))
+	sessionID = host.ID
+	err = nil
+	slog.Info("WHIP.Offer.Accepted", "streamKey", profile.StreamKey, "motd", profile.MOTD)
+	return
 }
 
 func WHIPDelete(streamInfo *auth.StreamInfo) error {

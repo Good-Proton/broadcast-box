@@ -1,9 +1,14 @@
-﻿import React, {useContext, useEffect, useRef, useState} from 'react'
-import {useLocation} from 'react-router-dom'
-import {useNavigate} from 'react-router-dom'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import PlayerHeader from '../playerHeader/PlayerHeader';
-import {StatusContext} from "../../providers/StatusProvider";
-import {UsersIcon} from "@heroicons/react/20/solid";
+import { parseLinkHeader } from '@web3-storage/parse-link-header';
+import Button from '../shared/Button';
+import { ErrorMessageEnum, getMediaErrorMessage } from './errorMessage';
+import ProfileSettings from './ProfileSettings';
+import Player from '../player/Player';
+import { LocaleContext } from '../../providers/LocaleProvider';
+import toBase64Utf8 from '../../utilities/base64';
 
 const mediaOptions = {
 	audio: true,
@@ -13,167 +18,207 @@ const mediaOptions = {
 	},
 }
 
-enum ErrorMessageEnum {
-	NoMediaDevices,
-	NotAllowedError,
-	NotFoundError
-}
-
-function getMediaErrorMessage(value: ErrorMessageEnum): string {
-	switch (value) {
-		case ErrorMessageEnum.NoMediaDevices:
-			return `MediaDevices API was not found. Publishing in Broadcast Box requires HTTPS 👮`;
-		case ErrorMessageEnum.NotFoundError:
-			return `Seems like you don't have camera 😭 Or you just blocked access to it...\nCheck camera settings, browser permissions and system permissions.`;
-		case ErrorMessageEnum.NotAllowedError:
-			return `You can't publish stream using your camera, because you have blocked access to it 😞`;
-		default:
-			return "Could not access your media device";
-	}
-}
+type MediaSource = "Screen" | "Webcam"
 
 function BrowserBroadcaster() {
 	const location = useLocation()
+	const { locale } = useContext(LocaleContext)
 	const navigate = useNavigate();
-	const streamKey = location.pathname.split('/').pop()
-	const { streamStatus } = useContext(StatusContext);
+	const streamKey = decodeURIComponent(location.pathname.split('/').pop() ?? "")
 	const [mediaAccessError, setMediaAccessError] = useState<ErrorMessageEnum | null>(null)
 	const [publishSuccess, setPublishSuccess] = useState(false)
-	const [useDisplayMedia, setUseDisplayMedia] = useState<"Screen" | "Webcam" | "None">("None");
+	const [useDisplayMedia, setUseDisplayMedia] = useState<MediaSource | "None">("None");
+	const [mediaRequestCount, setMediaRequestCount] = useState(0)
 	const [peerConnectionDisconnected, setPeerConnectionDisconnected] = useState(false)
-	const [currentViewersCount, setCurrentViewersCount] = useState<number>(0)
 	const [hasPacketLoss, setHasPacketLoss] = useState<boolean>(false)
 	const [hasSignal, setHasSignal] = useState<boolean>(false);
-	const [connectFailed, setConnectFailed] = useState<boolean>(false)
+	const [connectFailed, setConnectFailed] = useState<boolean>(false);
+	const [profileStateIsActive, setProfileStateIsActive] = useState<boolean>(false)
+	const [profileStreamKey, setProfileStreamKey] = useState<string>("")
 
 	const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+	const localMediaStreamRef = useRef<MediaStream | null>(null)
+	const eventSourceRef = useRef<EventSource | null>(null)
 	const videoRef = useRef<HTMLVideoElement>(null)
 	const hasSignalRef = useRef<boolean>(false);
 	const badSignalCountRef = useRef<number>(10);
 
-	const apiPath = import.meta.env.VITE_API_PATH;
-
-	const endStream = () => {
-		navigate('/')
-	}
-	
-	useEffect(() => {
-		peerConnectionRef.current = new RTCPeerConnection();
-		
-		return () => peerConnectionRef.current?.close()
-	}, [])
-
-	useEffect(() => {
-		if(!streamKey || !streamStatus){
-			return;
-		}
-
-		const sessions = streamStatus.filter((session) => session.streamKey === streamKey);
-
-		if(sessions.length !== 0){
-			setCurrentViewersCount(() => 
-				sessions.length !== 0 
-					? sessions[0].whepSessions.length
-					: 0)
-		}
-	}, [streamStatus]);
-
-	useEffect(() => {
-		if (useDisplayMedia === "None" || !peerConnectionRef.current) {
-			return;
-		}
-
-		let stream: MediaStream | undefined = undefined;
-
+	const endStream = () => navigate('/')
+	const requestMedia = (source: MediaSource) => {
 		if (!navigator.mediaDevices) {
 			setMediaAccessError(() => ErrorMessageEnum.NoMediaDevices);
-			setUseDisplayMedia(() => "None")
 			return
 		}
 
-		const isScreenShare = useDisplayMedia === "Screen"
-		const mediaPromise = isScreenShare ?
+		setUseDisplayMedia(source)
+		setMediaRequestCount(prev => prev + 1)
+	}
+
+	const stopLocalMediaStream = useCallback((localMediaStream: MediaStream | null) => {
+		if (!localMediaStream) {
+			return
+		}
+
+		localMediaStream
+			.getTracks()
+			.forEach((streamTrack: MediaStreamTrack) => streamTrack.stop())
+	}, [])
+
+	const getSenderByKind = useCallback((peerConnection: RTCPeerConnection, kind: "audio" | "video") => {
+		return peerConnection.getTransceivers().find(transceiver => transceiver.sender.track?.kind === kind)?.sender ??
+			peerConnection.getTransceivers().find(transceiver => transceiver.receiver.track.kind === kind)?.sender ??
+			null
+	}, [])
+
+	useEffect(() => {
+		return () => {
+			eventSourceRef.current?.close()
+			stopLocalMediaStream(localMediaStreamRef.current)
+			localMediaStreamRef.current = null
+			peerConnectionRef.current?.close()
+			peerConnectionRef.current = null
+		}
+	}, [stopLocalMediaStream])
+
+	useEffect(() => {
+		if (useDisplayMedia === "None") {
+			return;
+		}
+
+			let cancelled = false
+
+		const mediaPromise = useDisplayMedia == "Screen" ?
 			navigator.mediaDevices.getDisplayMedia(mediaOptions) :
 			navigator.mediaDevices.getUserMedia(mediaOptions)
 
-		mediaPromise.then(mediaStream => {
-			if (peerConnectionRef.current!.connectionState === "closed") {
-				mediaStream
-					.getTracks()
-					.forEach(mediaStreamTrack => mediaStreamTrack.stop())
+		mediaPromise.then(async mediaStream => {
+			const nextLocalMediaStream = mediaStream
 
+			if (cancelled) {
+				stopLocalMediaStream(nextLocalMediaStream)
 				return;
 			}
 
-			stream = mediaStream
+			const videoTrack = mediaStream.getVideoTracks()[0] ?? null
+			const audioTrack = mediaStream.getAudioTracks()[0] ?? null
+
+			const existingPeerConnection = peerConnectionRef.current
+			if (existingPeerConnection) {
+				const videoSender = getSenderByKind(existingPeerConnection, "video")
+				const audioSender = getSenderByKind(existingPeerConnection, "audio")
+
+				await Promise.all([
+					videoSender?.replaceTrack(videoTrack) ?? Promise.resolve(),
+					audioSender?.replaceTrack(audioTrack) ?? Promise.resolve(),
+				])
+
+				if (
+					cancelled ||
+					peerConnectionRef.current !== existingPeerConnection
+				) {
+					stopLocalMediaStream(nextLocalMediaStream)
+					return;
+				}
+
+				videoRef.current!.srcObject = mediaStream
+				const previousLocalMediaStream = localMediaStreamRef.current
+				localMediaStreamRef.current = nextLocalMediaStream
+				stopLocalMediaStream(previousLocalMediaStream)
+				return
+			}
+
+			const peerConnection = new RTCPeerConnection();
+			peerConnectionRef.current = peerConnection
+
+			if (
+				cancelled ||
+				peerConnectionRef.current !== peerConnection
+			) {
+				if (peerConnectionRef.current === peerConnection) {
+					peerConnectionRef.current = null
+				}
+				peerConnection.close()
+				stopLocalMediaStream(nextLocalMediaStream)
+				return
+			}
+
 			videoRef.current!.srcObject = mediaStream
+			const previousLocalMediaStream = localMediaStreamRef.current
+			localMediaStreamRef.current = nextLocalMediaStream
+			stopLocalMediaStream(previousLocalMediaStream)
 
-			mediaStream
-				.getTracks()
-				.forEach(mediaStreamTrack => {
-					if (mediaStreamTrack.kind === 'audio') {
-						peerConnectionRef.current!.addTransceiver(mediaStreamTrack, {
-							direction: 'sendonly'
-						})
-					} else {
-						peerConnectionRef.current!.addTransceiver(mediaStreamTrack, {
-							direction: 'sendonly',
-							sendEncodings: isScreenShare ? [] : [
-								{
-									rid: 'high',
-								},
-								{
-									rid: 'med',
-									scaleResolutionDownBy: 2.0
-								},
-								{
-									rid: 'low',
-									scaleResolutionDownBy: 4.0
-								}
-							]
-						})
+			peerConnection.addTransceiver(audioTrack ? audioTrack : "audio", { direction: 'sendonly' })
+
+			const isFirefox = navigator.userAgent.toLowerCase().includes('firefox')
+			const encodingPrefix = "Web"
+			peerConnection.addTransceiver(videoTrack ? videoTrack : "video", {
+				direction: 'sendonly',
+				sendEncodings: isFirefox ? undefined : [
+					{
+						rid: encodingPrefix + 'High',
+					},
+					{
+						rid: encodingPrefix + 'Mid',
+						scaleResolutionDownBy: 2.0
+					},
+					{
+						rid: encodingPrefix + 'Low',
+						scaleResolutionDownBy: 4.0
 					}
-				})
+				],
+			})
 
-			peerConnectionRef.current!.oniceconnectionstatechange = () => {
-				if (peerConnectionRef.current!.iceConnectionState === 'connected' || peerConnectionRef.current!.iceConnectionState === 'completed') {
+			peerConnection.oniceconnectionstatechange = () => {
+				if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
 					setPublishSuccess(() => true)
 					setMediaAccessError(() => null)
 					setPeerConnectionDisconnected(() => false)
-				} else if (peerConnectionRef.current!.iceConnectionState === 'disconnected' || peerConnectionRef.current!.iceConnectionState === 'failed') {
+				} else if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
 					setPublishSuccess(() => false)
 					setPeerConnectionDisconnected(() => true)
 				}
 			}
 
-			peerConnectionRef
-				.current!
+			peerConnection
 				.createOffer()
 				.then(offer => {
-					peerConnectionRef.current!.setLocalDescription(offer)
+					peerConnection.setLocalDescription(offer)
 						.catch((err) => console.error("SetLocalDescription", err));
 
-					fetch(`${apiPath}/whip`, {
+					fetch(`/api/whip`, {
 						method: 'POST',
 						body: offer.sdp,
 						headers: {
-							Authorization: `Bearer ${streamKey}`,
+							Authorization: `Bearer ${toBase64Utf8(streamKey)}`,
 							'Content-Type': 'application/sdp'
 						}
 					}).then(r => {
-						setConnectFailed(r.status !== 201)
-						if (connectFailed) {
-							throw new DOMException("WHIP endpoint did not return 201");
+
+						if (r.status !== 201) {
+							setConnectFailed(() => true)
+							console.error("WHIP Endpoint did not return 201")
+						}
+						const parsedLinkHeader = parseLinkHeader(r.headers.get('Link'))
+
+						if (parsedLinkHeader === null || parsedLinkHeader === undefined) {
+							throw new DOMException("Missing link header");
 						}
 
+						eventSourceRef.current?.close()
+						const evtSource = new EventSource(`${parsedLinkHeader['urn:ietf:params:whep:ext:core:server-sent-events'].url}`)
+						eventSourceRef.current = evtSource
+
+						evtSource.onerror = () => evtSource.close();
+
+						// Receive current status of the stream
+						// evtSource.addEventListener("status", (event: MessageEvent) => setCurrentStreamStatus(JSON.parse(event.data)))
+
 						return r.text()
-					})
-					.then(answer => {
-						peerConnectionRef.current!.setRemoteDescription({
+					}).then(answer => {
+						peerConnection.setRemoteDescription({
 							sdp: answer,
 							type: 'answer'
-						})
-						.catch((err) => console.error("SetRemoveDescription", err))
+						}).catch((err) => console.error("SetRemoteDescription", err))
 					})
 				})
 		}, (reason: ErrorMessageEnum) => {
@@ -182,14 +227,9 @@ function BrowserBroadcaster() {
 		})
 
 		return () => {
-			peerConnectionRef.current?.close()
-			if (stream) {
-				stream
-					.getTracks()
-					.forEach((streamTrack: MediaStreamTrack) => streamTrack.stop())
-			}
+			cancelled = true
 		}
-	}, [videoRef, useDisplayMedia, location.pathname])
+		}, [getSenderByKind, mediaRequestCount, stopLocalMediaStream, streamKey, useDisplayMedia])
 
 	useEffect(() => {
 		hasSignalRef.current = hasSignal;
@@ -201,20 +241,20 @@ function BrowserBroadcaster() {
 					sender.getStats()
 						.then(stats => {
 							stats.forEach(report => {
-									if (report.type === "outbound-rtp") {
-										senderHasPacketLoss = report.totalPacketSendDelay > 10;
-									}
-									if (report.type === "candidate-pair") {
-										const signalIsValid = report.availableIncomingBitrate !== undefined;
-										badSignalCountRef.current = signalIsValid ? 0 : badSignalCountRef.current + 1;
+								if (report.type === "outbound-rtp") {
+									senderHasPacketLoss = report.totalPacketSendDelay > 10;
+								}
+								if (report.type === "candidate-pair") {
+									const signalIsValid = report.availableIncomingBitrate !== undefined;
+									badSignalCountRef.current = signalIsValid ? 0 : badSignalCountRef.current + 1;
 
-										if (badSignalCountRef.current > 2) {
-											setHasSignal(() => false);
-										} else if (badSignalCountRef.current === 0 && !hasSignalRef.current) {
-											setHasSignal(() => true);
-										}
+									if (badSignalCountRef.current > 2) {
+										setHasSignal(() => false);
+									} else if (badSignalCountRef.current === 0 && !hasSignalRef.current) {
+										setHasSignal(() => true);
 									}
 								}
+							}
 							)
 						})
 				}
@@ -231,49 +271,57 @@ function BrowserBroadcaster() {
 	}, [hasSignal]);
 
 	return (
-		<div className='container mx-auto'>
-			{mediaAccessError != null && <PlayerHeader headerType={"Error"}> {getMediaErrorMessage(mediaAccessError)} </PlayerHeader>}
-			{peerConnectionDisconnected && <PlayerHeader headerType={"Error"}> WebRTC has disconnected or failed to connect at all 😭 </PlayerHeader>}
-			{connectFailed && <PlayerHeader headerType={"Error"}> Failed to start Broadcast Box session 👮 </PlayerHeader>}
-			{hasPacketLoss && <PlayerHeader headerType={"Warning"}> WebRTC is experiencing packet loss</PlayerHeader>}
-			{publishSuccess && <PlayerHeader headerType={"Success"}> Live: Currently streaming to <a href={window.location.href.replace('publish/', '')} target="_blank" rel="noreferrer" className="hover:underline">{window.location.href.replace('publish/', '')}</a> </PlayerHeader>}
+		<div className='flex flex-col container mx-auto gap-2'>
+			{mediaAccessError != null && <PlayerHeader headerType={"Error"}>{getMediaErrorMessage(locale, mediaAccessError)}</PlayerHeader>}
+			{peerConnectionDisconnected && <PlayerHeader headerType={"Error"}>{locale.player_header.connection_disconnected}</PlayerHeader>}
+			{connectFailed && <PlayerHeader headerType={"Error"}>{locale.player_header.connection_failed}</PlayerHeader>}
+			{hasPacketLoss && <PlayerHeader headerType={"Warning"}>{locale.player_header.connection_has_packetloss}</PlayerHeader>}
+			{publishSuccess && <PlayerHeader headerType={"Success"}>{locale.player_header.connection_established} <a href={window.location.href.replace('publish/', '')} target="_blank" rel="noreferrer" className="hover:underline">{window.location.href.replace('publish/', '')}</a></PlayerHeader>}
 
-			<video
-				ref={videoRef}
-				autoPlay
-				muted
-				controls
-				playsInline
-				className='w-full h-full'
-			/>
-			
-			<div className={"justify-items-end"} >
-				<div className={"flex flex-row items-center"}>
-					<UsersIcon className={"size-4"}/>
-					{currentViewersCount}
+			{/* Browser video feed */}
+			{profileStateIsActive ? (
+				<Player
+					streamKey={profileStreamKey}
+					cinemaMode={false} />
+			) : (
+				<video
+					ref={videoRef}
+					autoPlay
+					muted
+					controls
+					playsInline
+					className='w-full h-full aspect-video'
+				/>
+			)}
+
+			{/* Profile settings */}
+			<ProfileSettings stateHasChanged={(isActive, streamKey) => {
+				setProfileStateIsActive(() => isActive)
+				setProfileStreamKey(() => streamKey)
+			}
+			} />
+
+			{/* Buttons */}
+			{!profileStateIsActive && (
+				<div className="flex flex-row gap-2">
+					<Button
+						color='Accept'
+						title={locale.player_header.publish_screen}
+						onClick={() => requestMedia("Screen")}
+					/>
+					<Button
+						title={locale.player_header.publish_webcam}
+						onClick={() => requestMedia("Webcam")}
+					/>
 				</div>
-			</div>
-			<div className="flex flex-row gap-2">
-				<button
-					onClick={() => setUseDisplayMedia("Screen")}
-					className="appearance-none border w-full mt-5 py-2 px-3 leading-tight focus:outline-hidden focus:shadow-outline bg-blue-900 hover:bg-blue-800 border-gray-700 text-white rounded-sm shadow-md placeholder-gray-200">
-					Publish Screen/Window/Tab
-				</button>
-				<button
-					onClick={() => setUseDisplayMedia("Webcam")}
-					className="appearance-none border w-full mt-5 py-2 px-3 leading-tight focus:outline-hidden focus:shadow-outline bg-blue-900 hover:bg-blue-800 border-gray-700 text-white rounded-sm shadow-md placeholder-gray-200">
-					Publish Webcam
-				</button>
-			</div>
+			)}
 
+			{/* Conclude browser stream */}
 			{publishSuccess && (
-				<div>
-					<button
-						onClick={endStream}
-						className="appearance-none border w-full mt-5 py-2 px-3 leading-tight focus:outline-hidden focus:shadow-outline bg-red-900 hover:bg-red-800 border-gray-700 text-white rounded-sm shadow-md placeholder-gray-200">
-						End stream
-					</button>
-				</div>
+				<Button
+					title={locale.player_header.button_end_stream}
+					onClick={endStream}
+				/>
 			)}
 		</div>
 	)
