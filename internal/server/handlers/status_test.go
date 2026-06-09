@@ -38,6 +38,21 @@ func TestStatusHandlerAllowsMatchingAuthToken(t *testing.T) {
 	}
 }
 
+func TestStatusHandlerAllowsDisableStatusFalse(t *testing.T) {
+	t.Setenv(environment.DisableStatus, "false")
+	manager.SessionsManager = &manager.SessionManager{}
+	manager.SessionsManager.Setup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	resp := httptest.NewRecorder()
+
+	statusHandler(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, resp.Code)
+	}
+}
+
 func TestHealthcheckHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/healthcheck", nil)
 	resp := httptest.NewRecorder()
