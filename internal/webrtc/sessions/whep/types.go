@@ -14,6 +14,7 @@ type (
 	WHEPSession struct {
 		SessionID                  string
 		StreamKey                  string
+		AllowDataChannelMessages   bool
 		IsWaitingForKeyframe       atomic.Bool
 		IsSessionClosed            atomic.Bool
 		ConnectionEstablishedEpoch atomic.Int64

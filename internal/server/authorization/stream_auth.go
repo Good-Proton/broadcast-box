@@ -18,11 +18,29 @@ var (
 	streamKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-.~]+$`)
 )
 
+const (
+	WHEPAccessTypeViewer = "viewer"
+	WHEPAccessTypeEditor = "editor"
+)
+
 type StreamAuthInfo struct {
-	StreamKey  string
-	LhUserId   string
-	AccessType string
-	IsJwt      bool
+	StreamKey      string
+	LhUserId       string
+	AccessType     string
+	WHEPAccessType string
+	IsJwt          bool
+}
+
+func (info *StreamAuthInfo) AllowWHEPDataChannelMessages() bool {
+	if info == nil {
+		return false
+	}
+
+	if !info.IsJwt {
+		return true
+	}
+
+	return strings.EqualFold(info.WHEPAccessType, WHEPAccessTypeEditor)
 }
 
 func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*StreamAuthInfo, error) {
@@ -55,6 +73,7 @@ func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*S
 		authInfo.StreamKey = payload.SessionId
 		authInfo.LhUserId = payload.LhUserId
 		authInfo.AccessType = payload.AccessType
+		authInfo.WHEPAccessType = payload.WHEPAccessType
 		authInfo.IsJwt = true
 	}
 

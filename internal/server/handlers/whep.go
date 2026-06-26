@@ -70,8 +70,9 @@ func whepHandler(responseWriter http.ResponseWriter, request *http.Request) {
 	}
 
 	whipAnswer, sessionID, err := webrtc.WHEP(string(offer), authorization.PublicProfile{
-		StreamKey: streamKey,
-		LhUserId:  authInfo.LhUserId,
+		StreamKey:                streamKey,
+		LhUserId:                 authInfo.LhUserId,
+		AllowDataChannelMessages: authInfo.AllowWHEPDataChannelMessages(),
 	})
 	if err != nil {
 		slog.Error("API.WHEP: Setup Error", "err", err)

@@ -10,10 +10,11 @@ import (
 )
 
 type JwtPayload struct {
-	SessionId  string `json:"sessionId"`
-	LhUserId   string `json:"lhUserId"`
-	AccessType string `json:"accessType"`
-	WorkerIp   string `json:"workerIp"`
+	SessionId      string `json:"sessionId"`
+	LhUserId       string `json:"lhUserId"`
+	AccessType     string `json:"accessType"`
+	WHEPAccessType string `json:"whepAccessType"`
+	WorkerIp       string `json:"workerIp"`
 
 	jwt.RegisteredClaims
 }
