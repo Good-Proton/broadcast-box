@@ -26,7 +26,7 @@ func (w *WHIPSession) registerWHIPHandlers(peerConnection *webrtc.PeerConnection
 	w.PeerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		chatHandler := chatdc.NewHandler(w.ChatManager)
 		chatHandler.Bind(streamKey, w.ID, dataChannel)
-		datadc.Bind(streamKey, peers, w.ID, dataChannel)
+		datadc.Bind(streamKey, peers, w.ID, dataChannel, true)
 	})
 }
 

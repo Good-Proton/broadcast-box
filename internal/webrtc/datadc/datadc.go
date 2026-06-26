@@ -20,6 +20,16 @@ type Sender interface {
 	SendText(s string) error
 }
 
+type Channel interface {
+	Sender
+	Label() string
+	OnOpen(func())
+	OnMessage(func(webrtc.DataChannelMessage))
+	OnClose(func())
+	OnError(func(error))
+	Close() error
+}
+
 type Peer struct {
 	peerID  string
 	channel Sender
@@ -35,8 +45,16 @@ func (p *Peer) ID() string {
 	return p.peerID
 }
 
-func Bind(streamKey string, peers PeerStore, peerID string, dataChannel *webrtc.DataChannel) {
+func Bind(streamKey string, peers PeerStore, peerID string, dataChannel Channel, allowMessages bool) {
 	if dataChannel.Label() != DataChannelLabel {
+		return
+	}
+
+	if !allowMessages {
+		slog.Info("DataDC.Bind: peer not allowed", "streamKey", streamKey, "peerID", peerID)
+		if err := dataChannel.Close(); err != nil {
+			slog.Error("DataDC.Bind: close denied channel error", "streamKey", streamKey, "peerID", peerID, "err", err)
+		}
 		return
 	}
 

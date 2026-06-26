@@ -9,6 +9,8 @@ Use the WebRTC data channel label `bb-data-v1` to broadcast raw payloads to othe
 
 The server does not define an application protocol for this channel. Every message payload is copied and forwarded as-is to currently open `bb-data-v1` channels for the same stream, excluding the sender.
 
+When JWT authentication is enabled for WHEP, only WHEP users whose token payload has `whepAccessType: "editor"` can send or receive raw data channel messages. WHEP users with `whepAccessType: "viewer"` remain connected to the stream, but their raw data channel is closed and not registered as a relay peer.
+
 ## Simple client example
 
 ```ts
