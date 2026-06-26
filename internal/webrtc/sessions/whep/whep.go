@@ -17,21 +17,23 @@ func CreateNewWHEP(
 	videoTrack *codecs.TrackMultiCodec,
 	peerConnection *webrtc.PeerConnection,
 	pliSender func(),
+	allowDataChannelMessages bool,
 	chatManager *chat.Manager,
 ) (w *WHEPSession) {
 	slog.Debug("WHEPSession.CreateNewWHEP", "whepSessionID", whepSessionID)
 
 	w = &WHEPSession{
-		SessionID:               whepSessionID,
-		StreamKey:               streamKey,
-		AudioTrack:              audioTrack,
-		VideoTrack:              videoTrack,
-		AudioTimestamp:          5000,
-		VideoTimestamp:          5000,
-		PeerConnection:          peerConnection,
-		pliSender:               pliSender,
-		videoBitrateWindowStart: time.Now(),
-		ChatManager:             chatManager,
+		SessionID:                whepSessionID,
+		StreamKey:                streamKey,
+		AllowDataChannelMessages: allowDataChannelMessages,
+		AudioTrack:               audioTrack,
+		VideoTrack:               videoTrack,
+		AudioTimestamp:           5000,
+		VideoTimestamp:           5000,
+		PeerConnection:           peerConnection,
+		pliSender:                pliSender,
+		videoBitrateWindowStart:  time.Now(),
+		ChatManager:              chatManager,
 	}
 
 	w.AudioLayerCurrent.Store("")

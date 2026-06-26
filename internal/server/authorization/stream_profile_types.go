@@ -49,11 +49,12 @@ func (p *profile) asAdminProfile() *adminProfile {
 
 // Public profile struct for serving to public endpoints
 type PublicProfile struct {
-	StreamKey string `json:"streamKey"`
-	LhUserId  string `json:"lhUserId,omitempty"`
-	IsActive  bool   `json:"isActive"`
-	IsPublic  bool   `json:"isPublic"`
-	MOTD      string `json:"motd"`
+	StreamKey                string `json:"streamKey"`
+	LhUserId                 string `json:"lhUserId,omitempty"`
+	IsActive                 bool   `json:"isActive"`
+	IsPublic                 bool   `json:"isPublic"`
+	MOTD                     string `json:"motd"`
+	AllowDataChannelMessages bool   `json:"-"`
 }
 
 // Personal profile struct for serving to profile owner endpoints

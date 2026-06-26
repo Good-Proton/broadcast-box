@@ -33,6 +33,10 @@ func TestAuthenticateStreamRequestPlainTokenWhenJWTDisabled(t *testing.T) {
 	if authInfo.IsJwt {
 		t.Fatal("expected plain token auth, got JWT auth")
 	}
+
+	if !authInfo.AllowWHEPDataChannelMessages() {
+		t.Fatal("expected plain token auth to allow data channel messages")
+	}
 }
 
 func TestAuthenticateStreamRequestRejectsEmptyAuthorization(t *testing.T) {
@@ -47,7 +51,7 @@ func TestAuthenticateStreamRequestWithJWTAccessTypes(t *testing.T) {
 	privateKey, publicKeyPEM := generateTestECDSAKey(t)
 	t.Setenv(environment.JWTPublicKey, strings.ReplaceAll(string(publicKeyPEM), "\n", "\\n"))
 
-	whipToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whip")
+	whipToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whip", "")
 	whipReq := httptest.NewRequest(http.MethodPost, "/api/whip", nil)
 	whipReq.Header.Set("Authorization", "Bearer "+whipToken)
 
@@ -75,11 +79,58 @@ func TestAuthenticateStreamRequestWithJWTAccessTypes(t *testing.T) {
 		t.Fatal("expected WHIP token to fail WHEP auth")
 	}
 
-	whepToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whep")
+	whepToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whep", WHEPAccessTypeViewer)
 	whepReq.Header.Set("Authorization", "Bearer "+whepToken)
 
-	if _, err := AuthenticateStreamRequest(whepReq, webhook.WHEPConnect); err != nil {
+	whepAuthInfo, err := AuthenticateStreamRequest(whepReq, webhook.WHEPConnect)
+	if err != nil {
 		t.Fatalf("expected WHEP token to pass WHEP auth: %v", err)
+	}
+
+	if whepAuthInfo.WHEPAccessType != WHEPAccessTypeViewer {
+		t.Fatalf("whep access type = %q, want %q", whepAuthInfo.WHEPAccessType, WHEPAccessTypeViewer)
+	}
+
+	if whepAuthInfo.AllowWHEPDataChannelMessages() {
+		t.Fatal("expected WHEP viewer to be denied data channel messages")
+	}
+
+	whepEditorToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whep", WHEPAccessTypeEditor)
+	whepReq.Header.Set("Authorization", "Bearer "+whepEditorToken)
+
+	whepEditorAuthInfo, err := AuthenticateStreamRequest(whepReq, webhook.WHEPConnect)
+	if err != nil {
+		t.Fatalf("expected WHEP editor token to pass WHEP auth: %v", err)
+	}
+
+	if !whepEditorAuthInfo.AllowWHEPDataChannelMessages() {
+		t.Fatal("expected WHEP editor to send data channel messages")
+	}
+}
+
+func TestAuthenticateStreamRequestAllowsJWTWithoutWHEPAccessType(t *testing.T) {
+	privateKey, publicKeyPEM := generateTestECDSAKey(t)
+	t.Setenv(environment.JWTPublicKey, strings.ReplaceAll(string(publicKeyPEM), "\n", "\\n"))
+
+	whepToken := signTestJWTWithoutWHEPAccessType(t, privateKey, "session_123", "lh-user", "whep")
+	whepReq := httptest.NewRequest(http.MethodPost, "/api/whep", nil)
+	whepReq.Header.Set("Authorization", "Bearer "+whepToken)
+
+	authInfo, err := AuthenticateStreamRequest(whepReq, webhook.WHEPConnect)
+	if err != nil {
+		t.Fatalf("expected WHEP token without whepAccessType to pass WHEP auth: %v", err)
+	}
+
+	if authInfo.StreamKey != "session_123" {
+		t.Fatalf("stream key = %q, want %q", authInfo.StreamKey, "session_123")
+	}
+
+	if authInfo.WHEPAccessType != "" {
+		t.Fatalf("whep access type = %q, want empty", authInfo.WHEPAccessType)
+	}
+
+	if authInfo.AllowWHEPDataChannelMessages() {
+		t.Fatal("expected WHEP token without whepAccessType to be denied data channel messages")
 	}
 }
 
@@ -102,10 +153,39 @@ func generateTestECDSAKey(t *testing.T) (*ecdsa.PrivateKey, []byte) {
 	})
 }
 
-func signTestJWT(t *testing.T, privateKey *ecdsa.PrivateKey, sessionID, lhUserID, accessType string) string {
+func signTestJWT(t *testing.T, privateKey *ecdsa.PrivateKey, sessionID, lhUserID, accessType, whepAccessType string) string {
 	t.Helper()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, JwtPayload{
+		SessionId:      sessionID,
+		LhUserId:       lhUserID,
+		AccessType:     accessType,
+		WHEPAccessType: whepAccessType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	})
+
+	tokenString, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("failed to sign JWT: %v", err)
+	}
+
+	return tokenString
+}
+
+func signTestJWTWithoutWHEPAccessType(t *testing.T, privateKey *ecdsa.PrivateKey, sessionID, lhUserID, accessType string) string {
+	t.Helper()
+
+	type jwtPayloadWithoutWHEPAccessType struct {
+		SessionId  string `json:"sessionId"`
+		LhUserId   string `json:"lhUserId"`
+		AccessType string `json:"accessType"`
+
+		jwt.RegisteredClaims
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwtPayloadWithoutWHEPAccessType{
 		SessionId:  sessionID,
 		LhUserId:   lhUserID,
 		AccessType: accessType,
