@@ -330,7 +330,7 @@ See [CONNECTING.md](internal/chat/CONNECTING.md) for the message contract and a 
 Broadcast Box also accepts a raw WebRTC data channel (`bb-data-v1`) on WHIP/WHEP peer connections. Messages sent on
 this channel are broadcast as-is to other active peers on the same stream, excluding the sender. Text payloads stay
 text, binary payloads stay binary, and there is no persistent history. With JWT WHEP authentication, only tokens with
-`whepAccessType: "editor"` can send or receive raw data channel broadcasts.
+`whepAccessType: "editor"` can send raw data channel broadcasts; `viewer` tokens can receive them.
 
 See [CONNECTING.md](internal/webrtc/datadc/CONNECTING.md) for setup details and text/binary examples.
 

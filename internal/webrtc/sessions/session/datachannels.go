@@ -6,7 +6,7 @@ import (
 	"github.com/glimesh/broadcast-box/internal/webrtc/datadc"
 )
 
-func (s *Session) AddDataChannelPeer(peerID string, channel datadc.Sender) *datadc.Peer {
+func (s *Session) AddDataChannelPeer(peerID string, channel datadc.Sender, allowSending bool) *datadc.Peer {
 	s.DataChannelPeersLock.Lock()
 	defer s.DataChannelPeersLock.Unlock()
 
@@ -14,7 +14,7 @@ func (s *Session) AddDataChannelPeer(peerID string, channel datadc.Sender) *data
 		s.DataChannelPeers = map[string]*datadc.Peer{}
 	}
 
-	peer := datadc.NewPeer(peerID, channel)
+	peer := datadc.NewPeer(peerID, channel, allowSending)
 	s.DataChannelPeers[peerID] = peer
 	return peer
 }
@@ -34,6 +34,11 @@ func (s *Session) RemoveDataChannelPeer(peer *datadc.Peer) {
 
 func (s *Session) BroadcastDataChannelFrom(sender *datadc.Peer, payload []byte, isString bool) {
 	if sender == nil {
+		return
+	}
+
+	if !sender.MessageSendingAllowed() {
+		slog.Debug("DataDC.Broadcast: sender not allowed", "streamKey", s.StreamKey, "senderPeerID", sender.ID())
 		return
 	}
 

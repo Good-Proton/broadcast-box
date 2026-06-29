@@ -10,7 +10,7 @@ import (
 const DataChannelLabel = "bb-data-v1"
 
 type PeerStore interface {
-	AddDataChannelPeer(peerID string, channel Sender) *Peer
+	AddDataChannelPeer(peerID string, channel Sender, allowSending bool) *Peer
 	RemoveDataChannelPeer(peer *Peer)
 	BroadcastDataChannelFrom(sender *Peer, payload []byte, isString bool)
 }
@@ -27,34 +27,30 @@ type Channel interface {
 	OnMessage(func(webrtc.DataChannelMessage))
 	OnClose(func())
 	OnError(func(error))
-	Close() error
 }
 
 type Peer struct {
-	peerID  string
-	channel Sender
+	peerID       string
+	channel      Sender
+	allowSending bool
 
 	writeLock sync.Mutex
 }
 
-func NewPeer(peerID string, channel Sender) *Peer {
-	return &Peer{peerID: peerID, channel: channel}
+func NewPeer(peerID string, channel Sender, allowSending bool) *Peer {
+	return &Peer{peerID: peerID, channel: channel, allowSending: allowSending}
 }
 
 func (p *Peer) ID() string {
 	return p.peerID
 }
 
-func Bind(streamKey string, peers PeerStore, peerID string, dataChannel Channel, allowMessages bool) {
-	if dataChannel.Label() != DataChannelLabel {
-		return
-	}
+func (p *Peer) MessageSendingAllowed() bool {
+	return p.allowSending
+}
 
-	if !allowMessages {
-		slog.Info("DataDC.Bind: peer not allowed", "streamKey", streamKey, "peerID", peerID)
-		if err := dataChannel.Close(); err != nil {
-			slog.Error("DataDC.Bind: close denied channel error", "streamKey", streamKey, "peerID", peerID, "err", err)
-		}
+func Bind(streamKey string, peers PeerStore, peerID string, dataChannel Channel, allowSending bool) {
+	if dataChannel.Label() != DataChannelLabel {
 		return
 	}
 
@@ -77,7 +73,7 @@ func Bind(streamKey string, peers PeerStore, peerID string, dataChannel Channel,
 		}
 
 		if peer == nil {
-			peer = peers.AddDataChannelPeer(peerID, dataChannel)
+			peer = peers.AddDataChannelPeer(peerID, dataChannel, allowSending)
 		}
 		return peer
 	}
@@ -98,7 +94,12 @@ func Bind(streamKey string, peers PeerStore, peerID string, dataChannel Channel,
 		register()
 	})
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		peers.BroadcastDataChannelFrom(register(), msg.Data, msg.IsString)
+		peer := register()
+		if peer == nil || !peer.MessageSendingAllowed() {
+			return
+		}
+
+		peers.BroadcastDataChannelFrom(peer, msg.Data, msg.IsString)
 	})
 	dataChannel.OnClose(func() {
 		slog.Info("DataDC.Bind: closed", "streamKey", streamKey, "peerID", peerID)

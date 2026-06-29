@@ -31,7 +31,7 @@ type StreamAuthInfo struct {
 	IsJwt          bool
 }
 
-func (info *StreamAuthInfo) AllowWHEPDataChannelMessages() bool {
+func (info *StreamAuthInfo) AllowWHEPDataChannelMessageSending() bool {
 	if info == nil {
 		return false
 	}

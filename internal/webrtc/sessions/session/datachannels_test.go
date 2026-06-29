@@ -20,13 +20,13 @@ func TestDataChannelBroadcast(t *testing.T) {
 	failingRecipientChannel := &fakeDataChannel{sendTextError: errors.New("send failed")}
 	otherStreamChannel := &fakeDataChannel{}
 
-	sender := s.AddDataChannelPeer("sender", senderChannel)
-	recipient := s.AddDataChannelPeer("recipient", recipientChannel)
-	failingRecipient := s.AddDataChannelPeer("failing-recipient", failingRecipientChannel)
+	sender := s.AddDataChannelPeer("sender", senderChannel, true)
+	recipient := s.AddDataChannelPeer("recipient", recipientChannel, true)
+	failingRecipient := s.AddDataChannelPeer("failing-recipient", failingRecipientChannel, true)
 	(&Session{
 		StreamKey:        "stream-2",
 		DataChannelPeers: map[string]*datadc.Peer{},
-	}).AddDataChannelPeer("other-stream", otherStreamChannel)
+	}).AddDataChannelPeer("other-stream", otherStreamChannel, true)
 
 	// Text broadcasts
 	s.BroadcastDataChannelFrom(sender, []byte("hello"), true)
@@ -56,14 +56,42 @@ func TestDataChannelBroadcast(t *testing.T) {
 	// Replace a peer
 	oldChannel := &fakeDataChannel{}
 	newChannel := &fakeDataChannel{}
-	oldPeer := s.AddDataChannelPeer("duplicate", oldChannel)
-	newPeer := s.AddDataChannelPeer("duplicate", newChannel)
+	oldPeer := s.AddDataChannelPeer("duplicate", oldChannel, true)
+	newPeer := s.AddDataChannelPeer("duplicate", newChannel, true)
 
 	s.RemoveDataChannelPeer(oldPeer)
 	assert.True(t, s.isDataChannelPeerRegistered(newPeer))
 	s.BroadcastDataChannelFrom(sender, []byte("replacement"), true)
 	assert.Empty(t, oldChannel.textMessages)
 	assert.Equal(t, []string{"replacement"}, newChannel.textMessages)
+}
+
+func TestDataChannelBroadcastReceiveOnlyPeer(t *testing.T) {
+	s := &Session{
+		StreamKey:        "stream-1",
+		DataChannelPeers: map[string]*datadc.Peer{},
+	}
+
+	viewerChannel := &fakeDataChannel{}
+	editorChannel := &fakeDataChannel{}
+	recipientChannel := &fakeDataChannel{}
+
+	viewer := s.AddDataChannelPeer("viewer", viewerChannel, false)
+	editor := s.AddDataChannelPeer("editor", editorChannel, true)
+	s.AddDataChannelPeer("recipient", recipientChannel, true)
+
+	s.BroadcastDataChannelFrom(viewer, []byte("blocked"), true)
+	assert.Empty(t, recipientChannel.textMessages)
+	assert.Empty(t, editorChannel.textMessages)
+	assert.Equal(t, uint64(0), s.DataChannelMessagesReceived.Load())
+	assert.Equal(t, uint64(0), s.DataChannelBytesReceived.Load())
+
+	s.BroadcastDataChannelFrom(editor, []byte("allowed"), true)
+	assert.Equal(t, []string{"allowed"}, recipientChannel.textMessages)
+	assert.Equal(t, []string{"allowed"}, viewerChannel.textMessages)
+	assert.Equal(t, uint64(1), s.DataChannelMessagesReceived.Load())
+	assert.Equal(t, uint64(len("allowed")), s.DataChannelBytesReceived.Load())
+	assert.Equal(t, uint64(len("allowed")*2), s.DataChannelBytesSent.Load())
 }
 
 func (s *Session) isDataChannelPeerRegistered(peer *datadc.Peer) bool {

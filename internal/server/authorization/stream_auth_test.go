@@ -34,8 +34,8 @@ func TestAuthenticateStreamRequestPlainTokenWhenJWTDisabled(t *testing.T) {
 		t.Fatal("expected plain token auth, got JWT auth")
 	}
 
-	if !authInfo.AllowWHEPDataChannelMessages() {
-		t.Fatal("expected plain token auth to allow data channel messages")
+	if !authInfo.AllowWHEPDataChannelMessageSending() {
+		t.Fatal("expected plain token auth to allow data channel message sending")
 	}
 }
 
@@ -91,8 +91,8 @@ func TestAuthenticateStreamRequestWithJWTAccessTypes(t *testing.T) {
 		t.Fatalf("whep access type = %q, want %q", whepAuthInfo.WHEPAccessType, WHEPAccessTypeViewer)
 	}
 
-	if whepAuthInfo.AllowWHEPDataChannelMessages() {
-		t.Fatal("expected WHEP viewer to be denied data channel messages")
+	if whepAuthInfo.AllowWHEPDataChannelMessageSending() {
+		t.Fatal("expected WHEP viewer to be denied data channel message sending")
 	}
 
 	whepEditorToken := signTestJWT(t, privateKey, "session_123", "lh-user", "whep", WHEPAccessTypeEditor)
@@ -103,7 +103,7 @@ func TestAuthenticateStreamRequestWithJWTAccessTypes(t *testing.T) {
 		t.Fatalf("expected WHEP editor token to pass WHEP auth: %v", err)
 	}
 
-	if !whepEditorAuthInfo.AllowWHEPDataChannelMessages() {
+	if !whepEditorAuthInfo.AllowWHEPDataChannelMessageSending() {
 		t.Fatal("expected WHEP editor to send data channel messages")
 	}
 }
@@ -129,8 +129,8 @@ func TestAuthenticateStreamRequestAllowsJWTWithoutWHEPAccessType(t *testing.T) {
 		t.Fatalf("whep access type = %q, want empty", authInfo.WHEPAccessType)
 	}
 
-	if authInfo.AllowWHEPDataChannelMessages() {
-		t.Fatal("expected WHEP token without whepAccessType to be denied data channel messages")
+	if authInfo.AllowWHEPDataChannelMessageSending() {
+		t.Fatal("expected WHEP token without whepAccessType to be denied data channel message sending")
 	}
 }
 

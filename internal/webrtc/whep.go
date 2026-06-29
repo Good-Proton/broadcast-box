@@ -92,7 +92,7 @@ func WHEP(offer string, profile authorization.PublicProfile) (string, string, er
 		func() {
 			manager.SessionsManager.SendPLIByWHEPSessionID(whepSessionID)
 		},
-		profile.AllowDataChannelMessages,
+		profile.AllowDataChannelMessageSending,
 	); err != nil {
 		return "", "", err
 	}

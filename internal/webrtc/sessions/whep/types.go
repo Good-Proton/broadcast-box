@@ -12,13 +12,13 @@ import (
 
 type (
 	WHEPSession struct {
-		SessionID                  string
-		StreamKey                  string
-		AllowDataChannelMessages   bool
-		IsWaitingForKeyframe       atomic.Bool
-		IsSessionClosed            atomic.Bool
-		ConnectionEstablishedEpoch atomic.Int64
-		ICEConnectionState         atomic.Value
+		SessionID                      string
+		StreamKey                      string
+		AllowDataChannelMessageSending bool
+		IsWaitingForKeyframe           atomic.Bool
+		IsSessionClosed                atomic.Bool
+		ConnectionEstablishedEpoch     atomic.Int64
+		ICEConnectionState             atomic.Value
 
 		SessionClose sync.Once
 		onClose      func(string)

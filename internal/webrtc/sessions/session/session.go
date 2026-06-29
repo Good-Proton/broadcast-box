@@ -29,7 +29,7 @@ func (session *Session) SetOnClose(onClose func()) {
 }
 
 // Add WHEP viewer session
-func (s *Session) AddWHEP(whepSessionID string, peerConnection *webrtc.PeerConnection, audioTrack *codecs.TrackMultiCodec, videoTrack *codecs.TrackMultiCodec, videoRTCPSender *webrtc.RTPSender, pliSender func(), allowDataChannelMessages bool) (err error) {
+func (s *Session) AddWHEP(whepSessionID string, peerConnection *webrtc.PeerConnection, audioTrack *codecs.TrackMultiCodec, videoTrack *codecs.TrackMultiCodec, videoRTCPSender *webrtc.RTPSender, pliSender func(), allowDataChannelMessageSending bool) (err error) {
 	slog.Debug("WHIPSessionManager.WHIPSession.AddWHEPSession")
 
 	whepSession := whep.CreateNewWHEP(
@@ -39,7 +39,7 @@ func (s *Session) AddWHEP(whepSessionID string, peerConnection *webrtc.PeerConne
 		videoTrack,
 		peerConnection,
 		pliSender,
-		allowDataChannelMessages,
+		allowDataChannelMessageSending,
 		s.ChatManager,
 	)
 

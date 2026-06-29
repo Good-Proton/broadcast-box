@@ -1,28 +1,36 @@
 package datadc
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/pion/webrtc/v4"
 )
 
-func TestBindDeniedRawDataChannelClosesWithoutRegisteringPeer(t *testing.T) {
+func TestBindReceiveOnlyRawDataChannelRegistersWithoutBroadcasting(t *testing.T) {
 	store := &fakePeerStore{}
 	channel := &fakeChannel{label: DataChannelLabel}
 
 	Bind("stream-1", store, "viewer", channel, false)
 
-	if !channel.closed {
-		t.Fatal("expected denied raw data channel to close")
+	if channel.onOpen == nil {
+		t.Fatal("expected open handler")
+	}
+	if channel.onMessage == nil {
+		t.Fatal("expected message handler")
 	}
 
-	if channel.onOpen != nil || channel.onMessage != nil || channel.onClose != nil || channel.onError != nil {
-		t.Fatal("expected denied raw data channel to have no handlers")
+	channel.onOpen()
+	if len(store.added) != 1 {
+		t.Fatalf("registered peers = %d, want 1", len(store.added))
 	}
 
-	if len(store.added) != 0 {
-		t.Fatalf("registered peers = %d, want 0", len(store.added))
+	if store.added[0].MessageSendingAllowed() {
+		t.Fatal("expected receive-only peer to deny sending")
+	}
+
+	channel.onMessage(webrtc.DataChannelMessage{Data: []byte("blocked"), IsString: true})
+	if len(store.broadcasts) != 0 {
+		t.Fatalf("broadcasts = %d, want 0", len(store.broadcasts))
 	}
 }
 
@@ -31,10 +39,6 @@ func TestBindAllowedRawDataChannelRegistersAndBroadcasts(t *testing.T) {
 	channel := &fakeChannel{label: DataChannelLabel}
 
 	Bind("stream-1", store, "editor", channel, true)
-
-	if channel.closed {
-		t.Fatal("expected allowed raw data channel to stay open")
-	}
 
 	if channel.onOpen == nil {
 		t.Fatal("expected open handler")
@@ -66,8 +70,8 @@ type fakePeerStore struct {
 	broadcasts []fakeBroadcast
 }
 
-func (f *fakePeerStore) AddDataChannelPeer(peerID string, channel Sender) *Peer {
-	peer := NewPeer(peerID, channel)
+func (f *fakePeerStore) AddDataChannelPeer(peerID string, channel Sender, allowSending bool) *Peer {
+	peer := NewPeer(peerID, channel, allowSending)
 	f.added = append(f.added, peer)
 	return peer
 }
@@ -98,8 +102,6 @@ type fakeChannel struct {
 	onClose   func()
 	onError   func(error)
 
-	closed       bool
-	closeErr     error
 	textMessages []string
 	dataMessages [][]byte
 }
@@ -124,26 +126,12 @@ func (f *fakeChannel) OnError(handler func(error)) {
 	f.onError = handler
 }
 
-func (f *fakeChannel) Close() error {
-	f.closed = true
-	if f.closeErr != nil {
-		return f.closeErr
-	}
-	return nil
-}
-
 func (f *fakeChannel) Send(data []byte) error {
-	if f.closed {
-		return errors.New("channel closed")
-	}
 	f.dataMessages = append(f.dataMessages, append([]byte(nil), data...))
 	return nil
 }
 
 func (f *fakeChannel) SendText(s string) error {
-	if f.closed {
-		return errors.New("channel closed")
-	}
 	f.textMessages = append(f.textMessages, s)
 	return nil
 }
