@@ -10,7 +10,6 @@ import (
 )
 
 func TestCallWebhook(t *testing.T) {
-	// Setup a Mock HTTP Server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ok":
@@ -31,26 +30,24 @@ func TestCallWebhook(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		url         string
+		path        string
 		expectedErr bool
 		expectedKey string
 	}{
-		{"Success Case", "/ok", false, "dummy_stream_key"},
-		{"Server Timeout", "/timeout", true, ""},
-		{"Server Error", "/error", true, ""},
-		{"Malformed JSON", "/badjson", true, ""},
-		{"Not Found", "/notfound", true, ""},
+		{name: "success", path: "/ok", expectedKey: "dummy_stream_key"},
+		{name: "timeout", path: "/timeout", expectedErr: true},
+		{name: "server error", path: "/error", expectedErr: true},
+		{name: "malformed JSON", path: "/badjson", expectedErr: true},
+		{name: "not found", path: "/notfound", expectedErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest("GET", "/", nil)
-			req.RemoteAddr = "127.0.0.1"
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "127.0.0.1:1234"
 			req.Header.Set("User-Agent", "test-agent")
 
-			// call the function with test layers
-			result, err := CallWebhook(fmt.Sprintf("%s%s", mockServer.URL, tt.url), "action", "bearerToken", req)
-
+			result, err := CallWebhook(fmt.Sprintf("%s%s", mockServer.URL, tt.path), "action", "bearerToken", req)
 			if tt.expectedErr && err == nil {
 				t.Fatalf("expected an error but got none")
 			}

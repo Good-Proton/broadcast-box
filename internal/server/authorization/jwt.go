@@ -1,13 +1,16 @@
 package authorization
 
 import (
+	"crypto/ecdsa"
 	"errors"
-	"log/slog"
 	"os"
 
 	"github.com/glimesh/broadcast-box/internal/environment"
+	"github.com/glimesh/broadcast-box/internal/ip"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+var ErrAuthorizationNotReady = errors.New("authorization is not initialized")
 
 type JwtPayload struct {
 	SessionId      string `json:"sessionId"`
@@ -19,27 +22,71 @@ type JwtPayload struct {
 	jwt.RegisteredClaims
 }
 
+type jwtVerifier struct {
+	publicKey         *ecdsa.PublicKey
+	advertisedIPs     map[string]struct{}
+	advertisedAddress string
+}
+
+var cachedVerifier *jwtVerifier
+
+// IsJwtEnabled reports whether the process is configured for JWT stream auth.
+// When the key is absent, callers retain the legacy stream-key authorization
+// path; when it is present, startup must initialize a valid verifier.
 func IsJwtEnabled() bool {
-	return getJwtPublicKey() != ""
+	return environment.SanitizeValue(os.Getenv(environment.JWTPublicKey)) != ""
+}
+
+func Initialize() error {
+	cachedVerifier = nil
+
+	publicKeyPEM := environment.SanitizeValue(os.Getenv(environment.JWTPublicKey))
+	if publicKeyPEM == "" {
+		return errors.New("JWT_PUBLIC_KEY is required")
+	}
+
+	publicKey, err := jwt.ParseECPublicKeyFromPEM([]byte(publicKeyPEM))
+	if err != nil {
+		return errors.New("JWT_PUBLIC_KEY is invalid")
+	}
+
+	advertisedIPs, err := ip.ResolveAdvertisedIPs()
+	if err != nil || len(advertisedIPs) == 0 {
+		return errors.New("advertised public IP is unavailable")
+	}
+
+	cachedVerifier = &jwtVerifier{
+		publicKey:         publicKey,
+		advertisedIPs:     makeIPSet(advertisedIPs),
+		advertisedAddress: advertisedIPs[0],
+	}
+	return nil
+}
+
+// AdvertisedAddress returns the startup-cached address used by worker auth.
+func AdvertisedAddress() string {
+	if cachedVerifier == nil {
+		return ""
+	}
+
+	return cachedVerifier.advertisedAddress
 }
 
 func VerifyJwtToken(tokenString string) (*JwtPayload, error) {
-	publicKeyPem := getJwtPublicKey()
-	if publicKeyPem == "" {
-		return nil, jwt.ErrInvalidKey
+	verifier := cachedVerifier
+	if verifier == nil {
+		return nil, ErrAuthorizationNotReady
 	}
 
-	publicKey, err := jwt.ParseECPublicKeyFromPEM([]byte(publicKeyPem))
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&JwtPayload{},
+		func(_ *jwt.Token) (any, error) {
+			return verifier.publicKey, nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
+	)
 	if err != nil {
-		slog.Error("JWT public key parse failed", slog.Any("err", err))
-		return nil, err
-	}
-
-	token, err := jwt.ParseWithClaims(tokenString, &JwtPayload{}, func(token *jwt.Token) (any, error) {
-		return publicKey, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}))
-	if err != nil {
-		slog.Error("JWT parse failed", slog.Any("err", err))
 		return nil, err
 	}
 
@@ -52,13 +99,45 @@ func VerifyJwtToken(tokenString string) (*JwtPayload, error) {
 		return nil, jwt.ErrTokenInvalidClaims
 	}
 
-	if claims.SessionId == "" {
-		return nil, errors.New("jwt sessionId is empty")
+	if err := validateClaims(claims, verifier.advertisedIPs); err != nil {
+		return nil, err
 	}
 
 	return claims, nil
 }
 
-func getJwtPublicKey() string {
-	return environment.SanitizeValue(os.Getenv(environment.JWTPublicKey))
+func validateClaims(claims *JwtPayload, advertisedIPs map[string]struct{}) error {
+	if claims.SessionId == "" {
+		return errors.New("jwt sessionId is empty")
+	}
+	if claims.WorkerIp == "" {
+		return errors.New("jwt workerIp is empty")
+	}
+	if claims.ExpiresAt == nil {
+		return errors.New("jwt expiry is missing")
+	}
+	if claims.AccessType != "whip" && claims.AccessType != "whep" {
+		return errors.New("jwt accessType is invalid")
+	}
+	if claims.AccessType == "whep" &&
+		claims.WHEPAccessType != WHEPAccessTypeViewer &&
+		claims.WHEPAccessType != WHEPAccessTypeEditor {
+		return errors.New("jwt whepAccessType is invalid")
+	}
+	if claims.AccessType == "whip" && claims.WHEPAccessType != "" {
+		return errors.New("jwt whepAccessType is not allowed for WHIP")
+	}
+	if _, ok := advertisedIPs[claims.WorkerIp]; !ok {
+		return errors.New("jwt workerIp does not match this worker")
+	}
+
+	return nil
+}
+
+func makeIPSet(addresses []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		result[address] = struct{}{}
+	}
+	return result
 }

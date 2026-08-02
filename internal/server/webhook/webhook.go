@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/glimesh/broadcast-box/internal/environment"
-	"github.com/glimesh/broadcast-box/internal/ip"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
 )
 
 const defaultTimeout = time.Second * 5
@@ -28,11 +26,11 @@ type webhookResponse struct {
 	StreamKey string `json:"streamKey"`
 }
 
-type Action string
+type Action = authorization.Action
 
 const (
-	WHIPConnect Action = "whip-connect"
-	WHEPConnect Action = "whep-connect"
+	WHIPConnect = authorization.WHIPConnect
+	WHEPConnect = authorization.WHEPConnect
 )
 
 func CallWebhook(url string, action Action, bearerToken string, request *http.Request) (string, error) {
@@ -45,64 +43,51 @@ func CallWebhook(url string, action Action, bearerToken string, request *http.Re
 		}
 	}
 
-	jsonPayload, err := json.Marshal(webhookPayload{
+	payload, err := json.Marshal(webhookPayload{
 		Action:           action,
 		IP:               getIPAddress(request),
 		BearerToken:      bearerToken,
 		QueryParams:      queryParams,
 		UserAgent:        request.UserAgent(),
-		AdvertiseAddress: getAdvertiseAddress(),
+		AdvertiseAddress: authorization.AdvertisedAddress(),
 	})
-
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	webhookRequest, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	webhookRequest, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
-
 	webhookRequest.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{
-		Timeout: defaultTimeout,
-	}).Do(webhookRequest)
-
+	client := http.Client{Timeout: defaultTimeout}
+	response, err := client.Do(webhookRequest)
 	if err != nil {
 		return "", fmt.Errorf("webhook request failed after %v: %w", time.Since(start), err)
 	}
-
 	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			slog.Error("webhook request failed closing response body")
+		if err := response.Body.Close(); err != nil {
+			slog.Error("webhook response body close failed", "err", err)
 		}
 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("webhook returned non-200 Status: %v", resp.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("webhook returned non-200 status: %d", response.StatusCode)
 	}
 
-	response := webhookResponse{}
-	if err = json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+	var result webhookResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode webhook response: %w", err)
 	}
 
-	return response.StreamKey, nil
+	return result.StreamKey, nil
 }
 
-func getAdvertiseAddress() string {
-	if os.Getenv(environment.PublicIpApiUrl) == "" && os.Getenv(environment.IncludePublicIPInNAT1To1IP) == "" {
-		return ""
+func getIPAddress(request *http.Request) string {
+	if forwardedFor := request.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		return forwardedFor
 	}
 
-	return ip.GetPublicIP()
-}
-
-func getIPAddress(r *http.Request) string {
-	if r.Header.Get("X-Forwarded-For") != "" {
-		return r.Header.Get("X-Forwarded-For")
-	}
-	return r.RemoteAddr
+	return request.RemoteAddr
 }

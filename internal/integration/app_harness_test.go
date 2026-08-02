@@ -5,6 +5,11 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -13,9 +18,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type broadcastBoxProcess struct {
@@ -24,6 +32,7 @@ type broadcastBoxProcess struct {
 	done    chan struct{}
 	logs    *lockedBuffer
 	process *os.Process
+	jwtKey  *ecdsa.PrivateKey
 
 	mu      sync.Mutex
 	waitErr error
@@ -43,6 +52,7 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 
 	httpPort := freeTCPPort(t)
 	udpMuxPort := freeUDPPort(t)
+	jwtKey, jwtPublicKeyPEM := testJWTKey(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binaryPath)
@@ -60,15 +70,14 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 		"NETWORK_TYPES=udp4",
 		"NETWORK_TEST_ON_START=false",
 		"PUBLIC_IP_API_URL=",
-		"JWT_PUBLIC_KEY=",
+		"JWT_PUBLIC_KEY=" + jwtPublicKeyPEM,
+		"NAT_1_TO_1_IP=127.0.0.1",
 		"STATUS_AUTH_TOKEN=",
-		"WEBHOOK_URL=",
 		"SSL_KEY=",
 		"SSL_CERT=",
 		"ENABLE_HTTP_REDIRECT=",
 		"HTTPS_REDIRECT_PORT=",
 		"STUN_SERVERS=",
-		"NAT_1_TO_1_IP=",
 		"INCLUDE_PUBLIC_IP_IN_NAT_1_TO_1_IP=",
 		"UDP_MUX_PORT=" + fmt.Sprint(udpMuxPort),
 	}
@@ -84,6 +93,7 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 		done:    make(chan struct{}),
 		logs:    logs,
 		process: cmd.Process,
+		jwtKey:  jwtKey,
 	}
 	go func() {
 		err := cmd.Wait()
@@ -102,6 +112,57 @@ func startBroadcastBox(t *testing.T) *broadcastBoxProcess {
 
 	waitForHealth(t, app)
 	return app
+}
+
+func testJWTKey(t *testing.T) (*ecdsa.PrivateKey, string) {
+	t.Helper()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate test JWT key: %v", err)
+	}
+
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal test JWT public key: %v", err)
+	}
+
+	publicKeyPEM := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyDER,
+	})), "\n", "\\n")
+
+	return privateKey, publicKeyPEM
+}
+
+func (app *broadcastBoxProcess) token(t *testing.T, sessionID string, accessType string, whepAccessType string) string {
+	t.Helper()
+
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, struct {
+		SessionId      string `json:"sessionId"`
+		LhUserId       string `json:"lhUserId"`
+		AccessType     string `json:"accessType"`
+		WHEPAccessType string `json:"whepAccessType"`
+		WorkerIp       string `json:"workerIp"`
+		jwt.RegisteredClaims
+	}{
+		SessionId:      sessionID,
+		LhUserId:       "integration-user",
+		AccessType:     accessType,
+		WHEPAccessType: whepAccessType,
+		WorkerIp:       "127.0.0.1",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
+		},
+	})
+
+	signedToken, err := token.SignedString(app.jwtKey)
+	if err != nil {
+		t.Fatalf("sign integration JWT: %v", err)
+	}
+	return signedToken
 }
 
 func waitForHealth(t *testing.T, app *broadcastBoxProcess) {

@@ -30,7 +30,7 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	authInfo, err := authorization.AuthenticateStreamRequest(request, webhook.WHIPConnect)
+	authInfo, err := authorization.AuthenticateStreamRequest(request, authorization.WHIPConnect)
 	if err != nil {
 		helpers.LogHTTPError(responseWriter, "Authorization was invalid", http.StatusUnauthorized)
 		return
@@ -117,20 +117,15 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		}
 	}
 
-	// Stream requires webhook validation
 	if webhookURL := os.Getenv(environment.WebhookURL); webhookURL != "" {
-		streamKey, err := webhook.CallWebhook(webhookURL, webhook.WHIPConnect, userProfile.StreamKey, request)
+		streamKey, err := webhook.CallWebhook(webhookURL, webhook.WHIPConnect, authInfo.StreamKey, request)
 		if err != nil {
 			responseWriter.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		userProfile = authorization.PublicProfile{
-			StreamKey: streamKey,
-			LhUserId:  authInfo.LhUserId,
-			IsPublic:  true,
-			MOTD:      "Welcome to " + streamKey + "'s stream!",
-		}
+		userProfile.StreamKey = streamKey
+		userProfile.MOTD = "Welcome to " + streamKey + "'s stream!"
 	}
 
 	if request.Method == http.MethodPatch {

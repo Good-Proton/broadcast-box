@@ -54,7 +54,7 @@ func whepHandler(responseWriter http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	authInfo, err := authorization.AuthenticateStreamRequest(request, webhook.WHEPConnect)
+	authInfo, err := authorization.AuthenticateStreamRequest(request, authorization.WHEPConnect)
 	if err != nil {
 		helpers.LogHTTPError(responseWriter, "Authorization was invalid", http.StatusUnauthorized)
 		return
