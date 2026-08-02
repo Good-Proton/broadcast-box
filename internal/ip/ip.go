@@ -37,7 +37,11 @@ func ResolvePublicIP() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("public IP request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			slog.Debug("Public IP response body close failed", "err", err)
+		}
+	}()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return "", fmt.Errorf("public IP request returned status %d", response.StatusCode)
