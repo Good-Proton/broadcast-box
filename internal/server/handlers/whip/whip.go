@@ -118,7 +118,7 @@ func WHIPHandler(responseWriter http.ResponseWriter, request *http.Request) {
 	}
 
 	if webhookURL := os.Getenv(environment.WebhookURL); webhookURL != "" {
-		streamKey, err := webhook.CallWebhook(webhookURL, webhook.WHIPConnect, authInfo.StreamKey, request)
+		streamKey, err := webhook.CallWebhook(webhookURL, webhook.WHIPConnect, userProfile.StreamKey, request)
 		if err != nil {
 			responseWriter.WriteHeader(http.StatusUnauthorized)
 			return

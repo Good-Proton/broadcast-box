@@ -65,11 +65,15 @@ func Initialize() error {
 
 // AdvertisedAddress returns the startup-cached address used by worker auth.
 func AdvertisedAddress() string {
-	if cachedVerifier == nil {
-		return ""
+	if cachedVerifier != nil {
+		return cachedVerifier.advertisedAddress
 	}
 
-	return cachedVerifier.advertisedAddress
+	advertisedIPs, err := ip.ResolveAdvertisedIPs()
+	if err != nil || len(advertisedIPs) == 0 {
+		return ""
+	}
+	return advertisedIPs[0]
 }
 
 func VerifyJwtToken(tokenString string) (*JwtPayload, error) {
