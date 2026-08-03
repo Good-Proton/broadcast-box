@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/glimesh/broadcast-box/internal/server/helpers"
-	"github.com/glimesh/broadcast-box/internal/server/webhook"
 )
 
 var (
@@ -43,7 +42,7 @@ func (info *StreamAuthInfo) AllowWHEPDataChannelMessageSending() bool {
 	return strings.EqualFold(info.WHEPAccessType, WHEPAccessTypeEditor)
 }
 
-func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*StreamAuthInfo, error) {
+func AuthenticateStreamRequest(request *http.Request, action Action) (*StreamAuthInfo, error) {
 	token := helpers.ResolveBearerToken(request.Header.Get("Authorization"))
 	if token == "" {
 		slog.Info("Authorization was invalid")
@@ -85,11 +84,11 @@ func AuthenticateStreamRequest(request *http.Request, action webhook.Action) (*S
 	return authInfo, nil
 }
 
-func accessTypeForAction(action webhook.Action) string {
+func accessTypeForAction(action Action) string {
 	switch action {
-	case webhook.WHIPConnect:
+	case WHIPConnect:
 		return "whip"
-	case webhook.WHEPConnect:
+	case WHEPConnect:
 		return "whep"
 	default:
 		return ""

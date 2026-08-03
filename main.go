@@ -11,6 +11,7 @@ import (
 	"github.com/glimesh/broadcast-box/internal/environment"
 	"github.com/glimesh/broadcast-box/internal/networktest"
 	"github.com/glimesh/broadcast-box/internal/server"
+	"github.com/glimesh/broadcast-box/internal/server/authorization"
 	"github.com/glimesh/broadcast-box/internal/webrtc"
 
 	"net/http"
@@ -21,6 +22,12 @@ func main() {
 	environment.SetupLogger()
 	environment.LoadEnvironmentVariables()
 	console.HandleConsoleFlags()
+	if authorization.IsJwtEnabled() {
+		if err := authorization.Initialize(); err != nil {
+			slog.Error("Authorization startup failed", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	if shouldProfileApplication := os.Getenv(environment.EnableProfiling); strings.EqualFold(shouldProfileApplication, "true") {
 		go func() {

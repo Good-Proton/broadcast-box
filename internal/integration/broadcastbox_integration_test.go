@@ -15,12 +15,12 @@ const (
 func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 	app := startBroadcastBox(t)
 
-	publisher := startPublisher(t, app.baseURL+"/api/whip", testStreamKey)
+	publisher := startPublisher(t, app.baseURL+"/api/whip", app.token(t, testStreamKey, "whip", ""))
 	t.Cleanup(publisher.close)
 
 	viewers := []*viewer{
-		startViewer(t, app.baseURL+"/api/whep", testStreamKey, "viewer-1"),
-		startViewer(t, app.baseURL+"/api/whep", testStreamKey, "viewer-2"),
+		startViewer(t, app.baseURL+"/api/whep", app.token(t, testStreamKey, "whep", "viewer"), "viewer-1"),
+		startViewer(t, app.baseURL+"/api/whep", app.token(t, testStreamKey, "whep", "viewer"), "viewer-2"),
 	}
 	for _, viewer := range viewers {
 		t.Cleanup(viewer.close)
@@ -104,7 +104,7 @@ func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 		return true, ""
 	})
 
-	deleteWHIP(t, app.baseURL+"/api/whip", testStreamKey)
+	deleteWHIP(t, app.baseURL+"/api/whip", app.token(t, testStreamKey, "whip", ""))
 	publisher.close()
 
 	eventually(t, 5*time.Second, 100*time.Millisecond, func() (bool, string) {
@@ -122,10 +122,11 @@ func TestBroadcastBoxWHIPWHEPMediaPath(t *testing.T) {
 func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
 	app := startBroadcastBox(t)
 
-	publisher := startPublisher(t, app.baseURL+"/api/whip", testStreamKey+"-streamer-stop")
+	streamKey := testStreamKey + "-streamer-stop"
+	publisher := startPublisher(t, app.baseURL+"/api/whip", app.token(t, streamKey, "whip", ""))
 	t.Cleanup(publisher.close)
 
-	viewer := startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-streamer-stop", "viewer-streamer-stop")
+	viewer := startViewer(t, app.baseURL+"/api/whep", app.token(t, streamKey, "whep", "viewer"), "viewer-streamer-stop")
 	t.Cleanup(viewer.close)
 
 	eventually(t, 20*time.Second, 100*time.Millisecond, func() (bool, string) {
@@ -137,7 +138,7 @@ func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
 		if err != nil {
 			return false, err.Error()
 		}
-		status := findStatus(statuses, testStreamKey+"-streamer-stop")
+		status := findStatus(statuses, streamKey)
 		if status == nil {
 			return false, "stream not present in status"
 		}
@@ -156,7 +157,7 @@ func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
 			return false, err.Error()
 		}
 
-		status := findStatus(statuses, testStreamKey+"-streamer-stop")
+		status := findStatus(statuses, streamKey)
 		if status == nil {
 			return false, "stream unexpectedly removed while viewer is still connected"
 		}
@@ -177,7 +178,7 @@ func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
 		if err != nil {
 			return false, err.Error()
 		}
-		if status := findStatus(statuses, testStreamKey+"-streamer-stop"); status != nil {
+		if status := findStatus(statuses, streamKey); status != nil {
 			return false, "stream still present after streamer and viewer are closed"
 		}
 		return true, ""
@@ -187,12 +188,13 @@ func TestBroadcastBoxStopsStreamerWhileViewerActive(t *testing.T) {
 func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 	app := startBroadcastBox(t)
 
-	publisher := startPublisher(t, app.baseURL+"/api/whip", testStreamKey+"-viewers-stop")
+	streamKey := testStreamKey + "-viewers-stop"
+	publisher := startPublisher(t, app.baseURL+"/api/whip", app.token(t, streamKey, "whip", ""))
 	t.Cleanup(publisher.close)
 
 	viewers := []*viewer{
-		startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-viewers-stop", "viewer-a"),
-		startViewer(t, app.baseURL+"/api/whep", testStreamKey+"-viewers-stop", "viewer-b"),
+		startViewer(t, app.baseURL+"/api/whep", app.token(t, streamKey, "whep", "viewer"), "viewer-a"),
+		startViewer(t, app.baseURL+"/api/whep", app.token(t, streamKey, "whep", "viewer"), "viewer-b"),
 	}
 	for _, viewer := range viewers {
 		t.Cleanup(viewer.close)
@@ -204,7 +206,7 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 			return false, err.Error()
 		}
 
-		status := findStatus(statuses, testStreamKey+"-viewers-stop")
+		status := findStatus(statuses, streamKey)
 		if status == nil {
 			return false, "stream not present in status"
 		}
@@ -230,7 +232,7 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 			return false, err.Error()
 		}
 
-		status := findStatus(statuses, testStreamKey+"-viewers-stop")
+		status := findStatus(statuses, streamKey)
 		if status == nil {
 			return false, "stream unexpectedly removed while streamer is still active"
 		}
@@ -243,7 +245,7 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 		return true, ""
 	})
 
-	deleteWHIP(t, app.baseURL+"/api/whip", testStreamKey+"-viewers-stop")
+	deleteWHIP(t, app.baseURL+"/api/whip", app.token(t, streamKey, "whip", ""))
 	publisher.close()
 
 	eventually(t, 5*time.Second, 100*time.Millisecond, func() (bool, string) {
@@ -251,7 +253,7 @@ func TestBroadcastBoxStopsAllViewersWhileStreamerActive(t *testing.T) {
 		if err != nil {
 			return false, err.Error()
 		}
-		if status := findStatus(statuses, testStreamKey+"-viewers-stop"); status != nil {
+		if status := findStatus(statuses, streamKey); status != nil {
 			return false, "stream still present after WHIP delete"
 		}
 		return true, ""
