@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/glimesh/broadcast-box/internal/server/authorization"
 	"github.com/glimesh/broadcast-box/internal/webrtc/codecs"
@@ -48,6 +49,7 @@ func (s *Session) AddWHEP(whepSessionID string, peerConnection *webrtc.PeerConne
 	s.WHEPSessionsLock.Lock()
 	s.WHEPSessions[whepSessionID] = whepSession
 	s.WHEPSessionsLock.Unlock()
+	s.updateNoViewersTracking(time.Now())
 	s.updateHostWHEPSessionsSnapshot()
 	whepSession.RegisterWHEPHandlers(peerConnection, s)
 	go s.handleWHEPVideoRTCPSender(whepSession, videoRTCPSender)
@@ -92,6 +94,7 @@ func (s *Session) AddHost(peerConnection *webrtc.PeerConnection) (err error) {
 	host.WHEPSessionsSnapshot.Store(make(map[string]*whep.WHEPSession))
 	s.updateHostWHEPSessionsSnapshot()
 	s.HasHost.Store(true)
+	s.updateNoViewersTracking(time.Now())
 
 	return nil
 }
@@ -106,6 +109,7 @@ func (s *Session) RemoveHost() {
 
 	slog.Info("Session.RemoveHost", "streamKey", s.StreamKey)
 	s.HasHost.Store(false)
+	s.noViewers.clear()
 
 	host.WHEPSessionsSnapshot.Store(make(map[string]*whep.WHEPSession))
 	host.RemovePeerConnection()
@@ -126,6 +130,7 @@ func (s *Session) handleWHEPClose(whepSessionID string) {
 		return
 	}
 
+	s.updateNoViewersTracking(time.Now())
 	s.updateHostWHEPSessionsSnapshot()
 
 	if s.isEmpty() {

@@ -16,6 +16,7 @@ func (m *SessionManager) Setup() {
 	slog.Debug("WHIPSessionManager.Setup")
 
 	m.sessions = make(map[string]*session.Session)
+	m.setupNoViewersCleanup()
 }
 
 // Add new session
@@ -102,6 +103,10 @@ func (m *SessionManager) GetSessionStates(includePrivateStreams bool) (result []
 		}
 
 		s.StatusLock.RUnlock()
+
+		if noViewersSince, ok := s.NoViewersSince(); ok {
+			streamSession.NoViewersSince = noViewersSince
+		}
 
 		s.DataChannelPeersLock.RLock()
 		streamSession.DataChannelCount = len(s.DataChannelPeers)

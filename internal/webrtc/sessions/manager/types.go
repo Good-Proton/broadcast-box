@@ -2,6 +2,7 @@ package manager
 
 import (
 	"sync"
+	"time"
 
 	"github.com/glimesh/broadcast-box/internal/chat"
 	"github.com/glimesh/broadcast-box/internal/webrtc/sessions/session"
@@ -19,4 +20,8 @@ type SessionManager struct {
 	sessionsLock sync.RWMutex
 	sessions     map[string]*session.Session
 	ChatManager  *chat.Manager
+
+	noViewersTimeout       time.Duration
+	noViewersCheckInterval time.Duration
+	noViewersCleanupStop   chan struct{}
 }
