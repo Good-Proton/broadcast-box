@@ -14,6 +14,11 @@ const (
 )
 
 func (m *SessionManager) setupNoViewersCleanup() {
+	if stop := m.noViewersCleanupStop; stop != nil {
+		close(stop)
+		m.noViewersCleanupStop = nil
+	}
+
 	m.noViewersTimeout = parseDurationEnv(environment.IdleStreamTimeout)
 	if m.noViewersTimeout <= 0 {
 		return
@@ -21,7 +26,15 @@ func (m *SessionManager) setupNoViewersCleanup() {
 
 	m.noViewersCheckInterval = defaultNoViewersCheckInterval
 	if val := os.Getenv(environment.IdleStreamCheckInterval); val != "" {
-		if interval, err := time.ParseDuration(val); err == nil && interval > 0 {
+		interval, err := time.ParseDuration(val)
+		if err != nil || interval <= 0 {
+			slog.Warn("SessionManager: invalid duration env var, using default",
+				"key", environment.IdleStreamCheckInterval,
+				"value", val,
+				"default", m.noViewersCheckInterval,
+				"err", err,
+			)
+		} else {
 			m.noViewersCheckInterval = interval
 		}
 	}

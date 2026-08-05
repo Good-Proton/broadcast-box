@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// NoViewersSinceUnixNano stores when the stream entered a no-viewers state.
-// Zero means the stream currently has viewers or no active host.
 type noViewersTracker struct {
 	sinceUnixNano atomic.Int64
 }
