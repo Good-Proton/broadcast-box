@@ -23,6 +23,7 @@ type StreamSessionState struct {
 	IsPublic                      bool      `json:"isPublic"`
 	MOTD                          string    `json:"motd"`
 	StreamStart                   time.Time `json:"streamStart"`
+	NoViewersSince                time.Time `json:"noViewersSince,omitempty"`
 	WHIPConnectionEstablishedTime int64     `json:"whipConnectionEstablishedTime,omitempty"`
 	WHIPICEConnectionState        string    `json:"whipICEConnectionState,omitempty"`
 	DataChannelCount              int       `json:"dataChannelCount"`

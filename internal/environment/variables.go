@@ -35,6 +35,8 @@ const (
 
 	// WEBRTC
 	IncludeLoopbackCandidate = "INCLUDE_LOOPBACK_CANDIDATE"
+	IdleStreamTimeout        = "IDLE_STREAM_TIMEOUT"
+	IdleStreamCheckInterval  = "IDLE_STREAM_CHECK_INTERVAL"
 	NetworkTypes             = "NETWORK_TYPES"
 	TCPMuxForce              = "TCP_MUX_FORCE"
 	TCPMuxAddress            = "TCP_MUX_ADDRESS"

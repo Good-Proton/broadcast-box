@@ -39,4 +39,6 @@ type Session struct {
 	DataChannelMessagesReceived atomic.Uint64
 	DataChannelBytesReceived    atomic.Uint64
 	DataChannelBytesSent        atomic.Uint64
+
+	noViewers noViewersTracker
 }
